@@ -99,6 +99,8 @@ class TaskWorker:
             result = await client.register(display_name, referral_code)
 
             update_data: Dict[str, Any] = {
+                # 注册响应会 Set-Cookie 下发 zmine_session，必须保存，否则后续业务请求全部 401
+                "cookies": json.dumps(client.get_cookies_dict(), ensure_ascii=False),
                 "updated_at": datetime.now()
             }
             # loginKey 是后续登录凭证，存入 password 字段
@@ -248,8 +250,16 @@ class TaskWorker:
                     if account.status != 1:
                         raise ValueError(f"Account is disabled or abnormal: {task.account_id}")
 
-                    # 执行任务
-                    task_result = await self._execute_task(task, account, db)
+                    # 执行任务（会话缺失/过期时自动重登并重试一次，不消耗重试次数）
+                    try:
+                        task_result = await self._execute_task(task, account, db)
+                    except ZMineAPIError as e:
+                        if e.status_code != 401 or task.task_type == TaskType.LOGIN:
+                            raise
+                        # 用 loginKey 重新登录刷新 zmine_session，持久化后重试
+                        await self._handle_login_task(task, account, db)
+                        await db.refresh(account)
+                        task_result = await self._execute_task(task, account, db)
 
                     # 更新任务状态为成功
                     await self._update_task_status(
