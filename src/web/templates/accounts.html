@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>账号管理 - ZMINE 自动化系统</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <nav class="bg-blue-600 text-white p-4 shadow-lg">
+        <div class="container mx-auto flex justify-between items-center">
+            <h1 class="text-2xl font-bold flex items-center">
+                <i class="fa fa-cogs mr-2"></i> ZMINE 自动化系统
+            </h1>
+            <div class="flex space-x-4">
+                <a href="/" class="hover:bg-blue-700 px-3 py-2 rounded transition">仪表盘</a>
+                <a href="/accounts" class="bg-blue-700 px-3 py-2 rounded transition">账号管理</a>
+                <a href="/tasks" class="hover:bg-blue-700 px-3 py-2 rounded transition">任务管理</a>
+                <a href="/invite" class="hover:bg-blue-700 px-3 py-2 rounded transition">邀请矩阵</a>
+                <a href="/settings" class="hover:bg-blue-700 px-3 py-2 rounded transition">系统设置</a>
+            </div>
+        </div>
+    </nav>
+
+    <main class="container mx-auto p-4 mt-6">
+        <!-- 操作按钮 -->
+        <div class="flex justify-between items-center mb-6">
+            <h2 class="text-2xl font-bold">账号管理</h2>
+            <button onclick="openAddModal()" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition flex items-center">
+                <i class="fa fa-plus mr-2"></i> 添加账号
+            </button>
+        </div>
+
+        <!-- 账号列表 -->
+        <div class="bg-white rounded-lg shadow">
+            <div class="p-4 overflow-x-auto">
+                <table class="min-w-full">
+                    <thead>
+                        <tr class="bg-gray-50">
+                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">ID</th>
+                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">用户名</th>
+                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">邀请码</th>
+                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">邀请人ID</th>
+                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">当前积分</th>
+                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">累计积分</th>
+                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">挖矿状态</th>
+                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">状态</th>
+                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">创建时间</th>
+                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="accounts-table">
+                        <tr>
+                            <td colspan="10" class="px-4 py-8 text-center text-gray-500">加载中...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <!-- 添加账号模态框 -->
+    <div id="add-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+        <div class="bg-white rounded-lg p-6 w-full max-w-md">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold">添加新账号</h3>
+                <button onclick="closeAddModal()" class="text-gray-500 hover:text-gray-700">
+                    <i class="fa fa-times text-xl"></i>
+                </button>
+            </div>
+            <form id="add-form" onsubmit="addAccount(event)">
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">用户名</label>
+                    <input type="text" id="username" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="请输入用户名">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">邀请码（可选）</label>
+                    <input type="text" id="referral_code" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="请输入邀请码">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">邀请人ID（可选）</label>
+                    <input type="number" id="inviter_id" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="请输入邀请人ID">
+                </div>
+                <div class="flex justify-end space-x-3">
+                    <button type="button" onclick="closeAddModal()" class="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50 transition">取消</button>
+                    <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition">添加</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // 加载账号列表
+        async function loadAccounts() {
+            try {
+                const response = await fetch('/api/accounts?page_size=100');
+                const data = await response.json();
+                const tbody = document.getElementById('accounts-table');
+                tbody.innerHTML = '';
+
+                if (data.accounts.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="10" class="px-4 py-8 text-center text-gray-500">暂无账号</td></tr>';
+                    return;
+                }
+
+                data.accounts.forEach(account => {
+                    const row = document.createElement('tr');
+                    row.className = 'border-t hover:bg-gray-50';
+
+                    let statusClass = '';
+                    let statusText = '';
+                    switch (account.status) {
+                        case 0: statusClass = 'bg-red-100 text-red-800 px-2 py-1 rounded text-xs'; statusText = '禁用'; break;
+                        case 1: statusClass = 'bg-green-100 text-green-800 px-2 py-1 rounded text-xs'; statusText = '正常'; break;
+                        case 2: statusClass = 'bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs'; statusText = '异常'; break;
+                    }
+
+                    let miningClass = '';
+                    let miningText = '';
+                    switch (account.mining_status) {
+                        case 0: miningClass = 'bg-gray-100 text-gray-800 px-2 py-1 rounded text-xs'; miningText = '未开始'; break;
+                        case 1: miningClass = 'bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs'; miningText = '挖矿中'; break;
+                        case 2: miningClass = 'bg-green-100 text-green-800 px-2 py-1 rounded text-xs'; miningText = '可领取'; break;
+                    }
+
+                    row.innerHTML = `
+                        <td class="px-4 py-3">${account.id}</td>
+                        <td class="px-4 py-3">${account.username}</td>
+                        <td class="px-4 py-3 font-mono text-sm">${account.invite_code || '-'}</td>
+                        <td class="px-4 py-3">${account.inviter_id || '-'}</td>
+                        <td class="px-4 py-3 font-semibold">${account.points.toFixed(2)}</td>
+                        <td class="px-4 py-3 font-semibold">${account.total_points.toFixed(2)}</td>
+                        <td class="px-4 py-3"><span class="${miningClass}">${miningText}</span></td>
+                        <td class="px-4 py-3"><span class="${statusClass}">${statusText}</span></td>
+                        <td class="px-4 py-3 text-sm text-gray-500">${new Date(account.created_at).toLocaleString('zh-CN')}</td>
+                        <td class="px-4 py-3">
+                            <div class="flex space-x-2">
+                                <button onclick="loginAccount(${account.id})" class="text-blue-600 hover:text-blue-800" title="登录">
+                                    <i class="fa fa-sign-in"></i>
+                                </button>
+                                <button onclick="deleteAccount(${account.id})" class="text-red-600 hover:text-red-800" title="删除">
+                                    <i class="fa fa-trash"></i>
+                                </button>
+                            </div>
+                        </td>
+                    `;
+                    tbody.appendChild(row);
+                });
+            } catch (error) {
+                console.error('加载账号列表失败:', error);
+                document.getElementById('accounts-table').innerHTML = '<tr><td colspan="10" class="px-4 py-8 text-center text-red-500">加载失败</td></tr>';
+            }
+        }
+
+        // 打开添加模态框
+        function openAddModal() {
+            document.getElementById('add-modal').classList.remove('hidden');
+            document.getElementById('add-modal').classList.add('flex');
+        }
+
+        // 关闭添加模态框
+        function closeAddModal() {
+            document.getElementById('add-modal').classList.add('hidden');
+            document.getElementById('add-modal').classList.remove('flex');
+            document.getElementById('add-form').reset();
+        }
+
+        // 添加账号
+        async function addAccount(event) {
+            event.preventDefault();
+
+            const username = document.getElementById('username').value;
+            const referral_code = document.getElementById('referral_code').value;
+            const inviter_id = document.getElementById('inviter_id').value;
+
+            try {
+                const payload = {
+                    username: username,
+                    password: '', // 密码字段留空，注册后使用loginKey作为密码
+                    email: ''
+                };
+
+                if (referral_code) {
+                    payload.invite_code = referral_code;
+                }
+                if (inviter_id) {
+                    payload.inviter_id = parseInt(inviter_id);
+                }
+
+                const response = await fetch('/api/accounts', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                if (response.ok) {
+                    alert('账号添加成功！');
+                    closeAddModal();
+                    loadAccounts();
+                } else {
+                    const error = await response.json();
+                    alert(`添加失败: ${error.detail || '未知错误'}`);
+                }
+            } catch (error) {
+                console.error('添加账号失败:', error);
+                alert('添加失败，请稍后重试');
+            }
+        }
+
+        // 登录账号
+        async function loginAccount(accountId) {
+            if (!confirm('确定要触发该账号的登录任务吗？')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/accounts/${accountId}/login`, {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    alert('登录任务已创建！');
+                } else {
+                    const error = await response.json();
+                    alert(`创建登录任务失败: ${error.detail || '未知错误'}`);
+                }
+            } catch (error) {
+                console.error('登录账号失败:', error);
+                alert('操作失败，请稍后重试');
+            }
+        }
+
+        // 删除账号
+        async function deleteAccount(accountId) {
+            if (!confirm('确定要删除该账号吗？此操作不可恢复！')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/accounts/${accountId}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    alert('账号删除成功！');
+                    loadAccounts();
+                } else {
+                    const error = await response.json();
+                    alert(`删除失败: ${error.detail || '未知错误'}`);
+                }
+            } catch (error) {
+                console.error('删除账号失败:', error);
+                alert('删除失败，请稍后重试');
+            }
+        }
+
+        // 页面加载完成后执行
+        document.addEventListener('DOMContentLoaded', () => {
+            loadAccounts();
+        });
+    </script>
+</body>
+</html>

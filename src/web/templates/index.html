@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>仪表盘 - ZMINE 自动化管理系统</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <nav class="bg-blue-600 text-white p-4 shadow-lg">
+        <div class="container mx-auto flex justify-between items-center">
+            <h1 class="text-2xl font-bold flex items-center">
+                <i class="fa fa-cogs mr-2"></i> ZMINE 自动化系统
+            </h1>
+            <div class="flex space-x-4">
+                <a href="/" class="bg-blue-700 px-3 py-2 rounded transition">仪表盘</a>
+                <a href="/accounts" class="hover:bg-blue-700 px-3 py-2 rounded transition">账号管理</a>
+                <a href="/tasks" class="hover:bg-blue-700 px-3 py-2 rounded transition">任务管理</a>
+                <a href="/invite" class="hover:bg-blue-700 px-3 py-2 rounded transition">邀请矩阵</a>
+                <a href="/settings" class="hover:bg-blue-700 px-3 py-2 rounded transition">系统设置</a>
+            </div>
+        </div>
+    </nav>
+
+    <main class="container mx-auto p-4 mt-6">
+        <!-- 顶部标题栏 -->
+        <div class="flex justify-between items-center mb-6">
+            <h2 class="text-2xl font-bold">仪表盘</h2>
+            <div class="flex items-center space-x-3">
+                <span id="last-updated" class="text-sm text-gray-500"></span>
+                <button onclick="refreshAll()" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition flex items-center">
+                    <i id="refresh-icon" class="fa fa-refresh mr-2"></i> 刷新
+                </button>
+            </div>
+        </div>
+
+        <!-- 统计卡片 -->
+        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+            <div class="bg-white rounded-lg shadow p-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-500 text-sm">总账号数</p>
+                        <h3 class="text-3xl font-bold mt-1" id="total-accounts">-</h3>
+                        <p class="text-xs text-gray-400 mt-2" id="accounts-sub">正常 - · 异常 -</p>
+                    </div>
+                    <div class="bg-blue-100 p-3 rounded-full">
+                        <i class="fa fa-users text-blue-600 text-2xl"></i>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-lg shadow p-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-500 text-sm">运行中任务</p>
+                        <h3 class="text-3xl font-bold mt-1" id="running-tasks">-</h3>
+                        <p class="text-xs text-gray-400 mt-2" id="tasks-sub">等待中 - · 24h 成功率 -</p>
+                    </div>
+                    <div class="bg-yellow-100 p-3 rounded-full">
+                        <i class="fa fa-spinner text-yellow-600 text-2xl"></i>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-lg shadow p-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-500 text-sm">总积分</p>
+                        <h3 class="text-3xl font-bold mt-1" id="total-points">-</h3>
+                        <p class="text-xs text-gray-400 mt-2" id="mining-sub">挖矿中 - · 可领取 -</p>
+                    </div>
+                    <div class="bg-green-100 p-3 rounded-full">
+                        <i class="fa fa-diamond text-green-600 text-2xl"></i>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-lg shadow p-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-500 text-sm">邀请总数</p>
+                        <h3 class="text-3xl font-bold mt-1" id="total-invites">-</h3>
+                        <p class="text-xs text-gray-400 mt-2">一级邀请关系</p>
+                    </div>
+                    <div class="bg-purple-100 p-3 rounded-full">
+                        <i class="fa fa-sitemap text-purple-600 text-2xl"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 图表第一行：积分趋势 + 任务状态分布 -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+            <div class="bg-white rounded-lg shadow lg:col-span-2">
+                <div class="p-4 border-b">
+                    <h2 class="text-xl font-semibold">积分趋势</h2>
+                    <p class="text-xs text-gray-400 mt-1">按账号累计积分（近 7 天）</p>
+                </div>
+                <div class="p-4 h-64 relative">
+                    <canvas id="pointsChart"></canvas>
+                    <div id="pointsChart-empty" class="hidden absolute inset-0 flex items-center justify-center text-gray-400">
+                        <span><i class="fa fa-line-chart mr-2"></i>暂无数据</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-lg shadow">
+                <div class="p-4 border-b">
+                    <h2 class="text-xl font-semibold">任务状态分布</h2>
+                </div>
+                <div class="p-4 h-64 relative">
+                    <canvas id="taskStatusChart"></canvas>
+                    <div id="taskStatusChart-empty" class="hidden absolute inset-0 flex items-center justify-center text-gray-400">
+                        <span><i class="fa fa-pie-chart mr-2"></i>暂无任务</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 图表第二行：任务趋势 + 任务类型分布 -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+            <div class="bg-white rounded-lg shadow lg:col-span-2">
+                <div class="p-4 border-b">
+                    <h2 class="text-xl font-semibold">近 7 天任务趋势</h2>
+                </div>
+                <div class="p-4 h-64 relative">
+                    <canvas id="taskTrendChart"></canvas>
+                    <div id="taskTrendChart-empty" class="hidden absolute inset-0 flex items-center justify-center text-gray-400">
+                        <span><i class="fa fa-bar-chart mr-2"></i>暂无数据</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-lg shadow">
+                <div class="p-4 border-b">
+                    <h2 class="text-xl font-semibold">任务类型分布</h2>
+                </div>
+                <div class="p-4 h-64 relative">
+                    <canvas id="taskTypeChart"></canvas>
+                    <div id="taskTypeChart-empty" class="hidden absolute inset-0 flex items-center justify-center text-gray-400">
+                        <span><i class="fa fa-tasks mr-2"></i>暂无任务</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 最近任务 -->
+        <div class="bg-white rounded-lg shadow mb-6">
+            <div class="p-4 border-b flex justify-between items-center">
+                <h2 class="text-xl font-semibold">最近任务</h2>
+                <a href="/tasks" class="text-blue-600 hover:underline text-sm">查看全部 <i class="fa fa-angle-right"></i></a>
+            </div>
+            <div class="p-4">
+                <div class="overflow-x-auto">
+                    <table class="min-w-full">
+                        <thead>
+                            <tr class="bg-gray-50">
+                                <th class="px-4 py-2 text-left text-sm font-medium text-gray-500">ID</th>
+                                <th class="px-4 py-2 text-left text-sm font-medium text-gray-500">任务名称</th>
+                                <th class="px-4 py-2 text-left text-sm font-medium text-gray-500">类型</th>
+                                <th class="px-4 py-2 text-left text-sm font-medium text-gray-500">账号ID</th>
+                                <th class="px-4 py-2 text-left text-sm font-medium text-gray-500">状态</th>
+                                <th class="px-4 py-2 text-left text-sm font-medium text-gray-500">创建时间</th>
+                            </tr>
+                        </thead>
+                        <tbody id="recent-tasks">
+                            <tr>
+                                <td colspan="6" class="px-4 py-8 text-center text-gray-500">加载中...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // ============ 常量映射 ============
+        const taskStatusMap = {
+            0: { text: '等待中', cls: 'bg-yellow-100 text-yellow-800' },
+            1: { text: '运行中', cls: 'bg-blue-100 text-blue-800' },
+            2: { text: '成功',   cls: 'bg-green-100 text-green-800' },
+            3: { text: '失败',   cls: 'bg-red-100 text-red-800' },
+            4: { text: '已取消', cls: 'bg-gray-100 text-gray-800' }
+        };
+        const taskTypeMap = {
+            1: '注册', 2: '登录', 3: '完成任务',
+            4: '挖矿', 5: '领取收益', 6: '更新资料'
+        };
+        const chartColors = {
+            blue: 'rgb(59, 130, 246)',
+            yellow: 'rgb(234, 179, 8)',
+            green: 'rgb(34, 197, 94)',
+            red: 'rgb(239, 68, 68)',
+            gray: 'rgb(156, 163, 175)',
+            purple: 'rgb(168, 85, 247)'
+        };
+
+        // ============ 工具函数 ============
+        function timeAgo(iso) {
+            if (!iso) return '-';
+            const diff = Date.now() - new Date(iso).getTime();
+            const minutes = Math.floor(diff / 60000);
+            if (minutes < 1) return '刚刚';
+            if (minutes < 60) return `${minutes} 分钟前`;
+            const hours = Math.floor(minutes / 60);
+            if (hours < 24) return `${hours} 小时前`;
+            return new Date(iso).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+        }
+
+        function setStatusEmpty(id, empty) {
+            document.getElementById(id).classList.toggle('hidden', !empty);
+        }
+
+        // ============ 数据加载 ============
+        async function loadStats() {
+            const response = await fetch('/api/statistics/overview');
+            const data = await response.json();
+
+            document.getElementById('total-accounts').textContent = data.total_accounts;
+            document.getElementById('accounts-sub').textContent =
+                `正常 ${data.active_accounts ?? 0} · 异常 ${data.abnormal_accounts ?? 0}`;
+
+            document.getElementById('running-tasks').textContent = data.running_tasks ?? 0;
+            document.getElementById('tasks-sub').textContent =
+                `等待中 ${data.pending_tasks ?? 0} · 24h 成功率 ${data.success_rate_24h === null || data.success_rate_24h === undefined ? '-' : data.success_rate_24h + '%'}`;
+
+            document.getElementById('total-points').textContent = (data.total_points ?? 0).toLocaleString('zh-CN');
+            document.getElementById('mining-sub').textContent =
+                `挖矿中 ${data.mining_active ?? 0} · 可领取 ${data.mining_claimable ?? 0}`;
+
+            document.getElementById('total-invites').textContent = data.total_invites ?? 0;
+        }
+
+        async function loadRecentTasks() {
+            const response = await fetch('/api/tasks?limit=10');
+            const data = await response.json();
+            const tbody = document.getElementById('recent-tasks');
+            tbody.innerHTML = '';
+
+            if (!data.tasks || data.tasks.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-gray-500">暂无任务</td></tr>';
+                return;
+            }
+
+            data.tasks.forEach(task => {
+                const status = taskStatusMap[task.status] || { text: task.status, cls: 'bg-gray-100 text-gray-800' };
+                const row = document.createElement('tr');
+                row.className = 'border-t hover:bg-gray-50';
+                row.innerHTML = `
+                    <td class="px-4 py-3">${task.id}</td>
+                    <td class="px-4 py-3 max-w-xs truncate" title="${task.task_name}">${task.task_name}</td>
+                    <td class="px-4 py-3">${taskTypeMap[task.task_type] || task.task_type}</td>
+                    <td class="px-4 py-3">${task.account_id}</td>
+                    <td class="px-4 py-3"><span class="${status.cls} px-2 py-1 rounded text-xs">${status.text}</span></td>
+                    <td class="px-4 py-3 text-sm text-gray-500" title="${new Date(task.created_at).toLocaleString('zh-CN')}">${timeAgo(task.created_at)}</td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        async function loadTaskStatistics() {
+            const response = await fetch('/api/tasks/statistics');
+            const data = await response.json();
+            const statusStats = data.status || {};
+            const typeStats = data.type || {};
+
+            // 任务状态分布（环形图）
+            const statusKeys = [0, 1, 2, 3, 4].filter(k => statusStats[k] > 0);
+            updateChart(taskStatusChart, {
+                labels: statusKeys.map(k => taskStatusMap[k].text),
+                datasets: [{
+                    data: statusKeys.map(k => statusStats[k]),
+                    backgroundColor: statusKeys.map(k => [chartColors.yellow, chartColors.blue, chartColors.green, chartColors.red, chartColors.gray][k])
+                }]
+            });
+            setStatusEmpty('taskStatusChart-empty', statusKeys.length === 0);
+
+            // 任务类型分布（横向条形图）
+            const typeKeys = Object.keys(typeStats).map(Number).sort((a, b) => typeStats[b] - typeStats[a]);
+            updateChart(taskTypeChart, {
+                labels: typeKeys.map(k => taskTypeMap[k] || `类型${k}`),
+                datasets: [{
+                    data: typeKeys.map(k => typeStats[k]),
+                    backgroundColor: chartColors.purple
+                }]
+            }, true);
+            setStatusEmpty('taskTypeChart-empty', typeKeys.length === 0);
+        }
+
+        async function loadPointsTrend() {
+            const response = await fetch('/api/statistics/points-trend?days=7');
+            const data = await response.json();
+            updateChart(pointsChart, {
+                labels: data.labels,
+                datasets: [{
+                    label: '总积分',
+                    data: data.trend,
+                    borderColor: chartColors.blue,
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                    tension: 0.4,
+                    fill: true,
+                    pointRadius: 3
+                }]
+            });
+            const hasData = data.trend && data.trend.some(v => v > 0);
+            setStatusEmpty('pointsChart-empty', !hasData);
+        }
+
+        async function loadTaskTrend() {
+            const response = await fetch('/api/statistics/task-trend?days=7');
+            const data = await response.json();
+            updateChart(taskTrendChart, {
+                labels: data.labels,
+                datasets: [
+                    {
+                        label: '创建任务',
+                        data: data.created,
+                        backgroundColor: 'rgba(59, 130, 246, 0.6)'
+                    },
+                    {
+                        label: '执行成功',
+                        data: data.success,
+                        backgroundColor: 'rgba(34, 197, 94, 0.6)'
+                    }
+                ]
+            });
+            const hasData = (data.created || []).some(v => v > 0);
+            setStatusEmpty('taskTrendChart-empty', !hasData);
+        }
+
+        // ============ 图表初始化与更新 ============
+        const baseOptions = {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false }
+            }
+        };
+
+        function updateChart(chart, data, horizontal) {
+            chart.options.indexAxis = horizontal ? 'y' : 'x';
+            chart.data = data;
+            chart.update();
+        }
+
+        let pointsChart, taskStatusChart, taskTrendChart, taskTypeChart;
+
+        function initCharts() {
+            pointsChart = new Chart(
+                document.getElementById('pointsChart').getContext('2d'),
+                {
+                    type: 'line',
+                    data: { labels: [], datasets: [] },
+                    options: {
+                        ...baseOptions,
+                        scales: { y: { beginAtZero: true } }
+                    }
+                }
+            );
+
+            taskStatusChart = new Chart(
+                document.getElementById('taskStatusChart').getContext('2d'),
+                {
+                    type: 'doughnut',
+                    data: { labels: [], datasets: [{ data: [] }] },
+                    options: {
+                        ...baseOptions,
+                        cutout: '60%',
+                        plugins: {
+                            legend: { position: 'bottom', labels: { boxWidth: 12, padding: 12 } }
+                        }
+                    }
+                }
+            );
+
+            taskTrendChart = new Chart(
+                document.getElementById('taskTrendChart').getContext('2d'),
+                {
+                    type: 'bar',
+                    data: { labels: [], datasets: [] },
+                    options: {
+                        ...baseOptions,
+                        scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
+                        plugins: { legend: { display: true, position: 'bottom', labels: { boxWidth: 12 } } }
+                    }
+                }
+            );
+
+            taskTypeChart = new Chart(
+                document.getElementById('taskTypeChart').getContext('2d'),
+                {
+                    type: 'bar',
+                    data: { labels: [], datasets: [{ data: [] }] },
+                    options: {
+                        ...baseOptions,
+                        scales: { x: { beginAtZero: true, ticks: { precision: 0 } } }
+                    }
+                }
+            );
+        }
+
+        // ============ 刷新控制 ============
+        let refreshing = false;
+
+        async function refreshAll() {
+            if (refreshing) return;
+            refreshing = true;
+            document.getElementById('refresh-icon').classList.add('fa-spin');
+
+            const tasks = [
+                loadStats(),
+                loadRecentTasks(),
+                loadTaskStatistics(),
+                loadPointsTrend(),
+                loadTaskTrend()
+            ];
+            const results = await Promise.allSettled(tasks);
+
+            // 最近任务加载失败时提示
+            if (results[1].status === 'rejected') {
+                document.getElementById('recent-tasks').innerHTML =
+                    '<tr><td colspan="6" class="px-4 py-8 text-center text-red-500">加载失败，请稍后重试</td></tr>';
+            }
+
+            document.getElementById('last-updated').textContent =
+                `最后更新 ${new Date().toLocaleTimeString('zh-CN')}`;
+            document.getElementById('refresh-icon').classList.remove('fa-spin');
+            refreshing = false;
+        }
+
+        // 页面加载完成后执行
+        document.addEventListener('DOMContentLoaded', () => {
+            initCharts();
+            refreshAll();
+            // 每隔30秒自动刷新
+            setInterval(refreshAll, 30000);
+        });
+    </script>
+</body>
+</html>

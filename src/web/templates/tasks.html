@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>任务管理 - ZMINE 自动化系统</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <nav class="bg-blue-600 text-white p-4 shadow-lg">
+        <div class="container mx-auto flex justify-between items-center">
+            <h1 class="text-2xl font-bold flex items-center">
+                <i class="fa fa-cogs mr-2"></i> ZMINE 自动化系统
+            </h1>
+            <div class="flex space-x-4">
+                <a href="/" class="hover:bg-blue-700 px-3 py-2 rounded transition">仪表盘</a>
+                <a href="/accounts" class="hover:bg-blue-700 px-3 py-2 rounded transition">账号管理</a>
+                <a href="/tasks" class="bg-blue-700 px-3 py-2 rounded transition">任务管理</a>
+                <a href="/invite" class="hover:bg-blue-700 px-3 py-2 rounded transition">邀请矩阵</a>
+                <a href="/settings" class="hover:bg-blue-700 px-3 py-2 rounded transition">系统设置</a>
+            </div>
+        </div>
+    </nav>
+
+    <main class="container mx-auto p-4 mt-6">
+        <!-- 操作按钮 -->
+        <div class="flex justify-between items-center mb-6">
+            <h2 class="text-2xl font-bold">任务管理</h2>
+            <button onclick="openCreateModal()" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition flex items-center">
+                <i class="fa fa-plus mr-2"></i> 创建任务
+            </button>
+        </div>
+
+        <!-- 任务筛选 -->
+        <div class="bg-white rounded-lg shadow mb-6 p-4">
+            <div class="flex flex-wrap gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">状态</label>
+                    <select id="status-filter" onchange="loadTasks()" class="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="">全部</option>
+                        <option value="0">等待中</option>
+                        <option value="1">运行中</option>
+                        <option value="2">成功</option>
+                        <option value="3">失败</option>
+                        <option value="4">已取消</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">任务类型</label>
+                    <select id="type-filter" onchange="loadTasks()" class="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="">全部</option>
+                        <option value="1">登录</option>
+                        <option value="2">完成任务</option>
+                        <option value="3">挖矿</option>
+                        <option value="4">领取收益</option>
+                        <option value="5">更新资料</option>
+                    </select>
+                </div>
+                <div class="flex items-end">
+                    <button onclick="loadTasks()" class="bg-gray-600 text-white px-4 py-2 rounded hover:bg-gray-700 transition flex items-center">
+                        <i class="fa fa-refresh mr-2"></i> 刷新
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 任务列表 -->
+        <div class="bg-white rounded-lg shadow">
+            <div class="p-4 overflow-x-auto">
+                <table class="min-w-full">
+                    <thead>
+                        <tr class="bg-gray-50">
+                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">ID</th>
+                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">任务名称</th>
+                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">账号ID</th>
+                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">类型</th>
+                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">状态</th>
+                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">重试次数</th>
+                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">错误信息</th>
+                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">创建时间</th>
+                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">完成时间</th>
+                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tasks-table">
+                        <tr>
+                            <td colspan="10" class="px-4 py-8 text-center text-gray-500">加载中...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <!-- 创建任务模态框 -->
+    <div id="create-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+        <div class="bg-white rounded-lg p-6 w-full max-w-md">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold">创建新任务</h3>
+                <button onclick="closeCreateModal()" class="text-gray-500 hover:text-gray-700">
+                    <i class="fa fa-times text-xl"></i>
+                </button>
+            </div>
+            <form id="create-form" onsubmit="createTask(event)">
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">账号ID</label>
+                    <input type="number" id="account_id" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="请输入账号ID">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">任务类型</label>
+                    <select id="task_type" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="">请选择任务类型</option>
+                        <option value="1">注册账号</option>
+                        <option value="2">登录账号</option>
+                        <option value="4">开始挖矿</option>
+                        <option value="5">领取收益</option>
+                        <option value="6">同步账号信息</option>
+                    </select>
+                </div>
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">任务名称</label>
+                    <input type="text" id="task_name" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="请输入任务名称">
+                </div>
+                <div class="flex justify-end space-x-3">
+                    <button type="button" onclick="closeCreateModal()" class="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50 transition">取消</button>
+                    <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition">创建</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // 任务类型映射（与 worker TaskType 枚举一致：1注册 2登录 3完成任务 4挖矿 5领取收益 6同步资料）
+        const taskTypeMap = {
+            1: '注册',
+            2: '登录',
+            3: '完成任务',
+            4: '挖矿',
+            5: '领取收益',
+            6: '同步资料'
+        };
+
+        // 加载任务列表
+        async function loadTasks() {
+            try {
+                const status = document.getElementById('status-filter').value;
+                const type = document.getElementById('type-filter').value;
+
+                let url = '/api/tasks?page_size=200';
+                if (status) url += `&status=${status}`;
+                if (type) url += `&task_type=${type}`;
+
+                const response = await fetch(url);
+                const data = await response.json();
+                const tbody = document.getElementById('tasks-table');
+                tbody.innerHTML = '';
+
+                if (data.tasks.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="10" class="px-4 py-8 text-center text-gray-500">暂无任务</td></tr>';
+                    return;
+                }
+
+                data.tasks.forEach(task => {
+                    const row = document.createElement('tr');
+                    row.className = 'border-t hover:bg-gray-50';
+
+                    let statusClass = '';
+                    let statusText = '';
+                    switch (task.status) {
+                        case 0: statusClass = 'bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs'; statusText = '等待中'; break;
+                        case 1: statusClass = 'bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs'; statusText = '运行中'; break;
+                        case 2: statusClass = 'bg-green-100 text-green-800 px-2 py-1 rounded text-xs'; statusText = '成功'; break;
+                        case 3: statusClass = 'bg-red-100 text-red-800 px-2 py-1 rounded text-xs'; statusText = '失败'; break;
+                        case 4: statusClass = 'bg-gray-100 text-gray-800 px-2 py-1 rounded text-xs'; statusText = '已取消'; break;
+                    }
+
+                    row.innerHTML = `
+                        <td class="px-4 py-3">${task.id}</td>
+                        <td class="px-4 py-3">${task.task_name}</td>
+                        <td class="px-4 py-3">${task.account_id}</td>
+                        <td class="px-4 py-3">${taskTypeMap[task.task_type] || task.task_type}</td>
+                        <td class="px-4 py-3"><span class="${statusClass}">${statusText}</span></td>
+                        <td class="px-4 py-3">${task.retry_count}/${task.max_retries}</td>
+                        <td class="px-4 py-3 text-sm text-red-600 max-w-xs truncate">${task.error_msg || '-'}</td>
+                        <td class="px-4 py-3 text-sm text-gray-500">${new Date(task.created_at).toLocaleString('zh-CN')}</td>
+                        <td class="px-4 py-3 text-sm text-gray-500">${task.finished_at ? new Date(task.finished_at).toLocaleString('zh-CN') : '-'}</td>
+                        <td class="px-4 py-3">
+                            <div class="flex space-x-2">
+                                ${task.status === 0 || task.status === 1 ? `
+                                <button onclick="cancelTask(${task.id})" class="text-red-600 hover:text-red-800" title="取消任务">
+                                    <i class="fa fa-times-circle"></i>
+                                </button>
+                                ` : ''}
+                                <button onclick="viewTask(${task.id})" class="text-blue-600 hover:text-blue-800" title="查看详情">
+                                    <i class="fa fa-eye"></i>
+                                </button>
+                            </div>
+                        </td>
+                    `;
+                    tbody.appendChild(row);
+                });
+            } catch (error) {
+                console.error('加载任务列表失败:', error);
+                document.getElementById('tasks-table').innerHTML = '<tr><td colspan="10" class="px-4 py-8 text-center text-red-500">加载失败</td></tr>';
+            }
+        }
+
+        // 打开创建模态框
+        function openCreateModal() {
+            document.getElementById('create-modal').classList.remove('hidden');
+            document.getElementById('create-modal').classList.add('flex');
+        }
+
+        // 关闭创建模态框
+        function closeCreateModal() {
+            document.getElementById('create-modal').classList.add('hidden');
+            document.getElementById('create-modal').classList.remove('flex');
+            document.getElementById('create-form').reset();
+        }
+
+        // 创建任务
+        async function createTask(event) {
+            event.preventDefault();
+
+            const account_id = parseInt(document.getElementById('account_id').value);
+            const task_type = parseInt(document.getElementById('task_type').value);
+            const task_name = document.getElementById('task_name').value;
+
+            try {
+                const payload = {
+                    account_id: account_id,
+                    task_type: task_type,
+                    task_name: task_name
+                };
+
+                const response = await fetch('/api/tasks', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                if (response.ok) {
+                    alert('任务创建成功！');
+                    closeCreateModal();
+                    loadTasks();
+                } else {
+                    const error = await response.json();
+                    alert(`创建失败: ${error.detail || '未知错误'}`);
+                }
+            } catch (error) {
+                console.error('创建任务失败:', error);
+                alert('创建失败，请稍后重试');
+            }
+        }
+
+        // 取消任务
+        async function cancelTask(taskId) {
+            if (!confirm('确定要取消该任务吗？')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/tasks/${taskId}/cancel`, {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    alert('任务已取消！');
+                    loadTasks();
+                } else {
+                    const error = await response.json();
+                    alert(`取消失败: ${error.detail || '未知错误'}`);
+                }
+            } catch (error) {
+                console.error('取消任务失败:', error);
+                alert('操作失败，请稍后重试');
+            }
+        }
+
+        // 查看任务详情
+        async function viewTask(taskId) {
+            try {
+                const response = await fetch(`/api/tasks/${taskId}`);
+                const task = await response.json();
+
+                let details = `任务ID: ${task.id}\n`;
+                details += `任务名称: ${task.task_name}\n`;
+                details += `账号ID: ${task.account_id}\n`;
+                details += `任务类型: ${taskTypeMap[task.task_type] || task.task_type}\n`;
+                details += `状态: ${task.status}\n`;
+                details += `重试次数: ${task.retry_count}/${task.max_retries}\n`;
+                details += `创建时间: ${new Date(task.created_at).toLocaleString('zh-CN')}\n`;
+                if (task.started_at) details += `开始时间: ${new Date(task.started_at).toLocaleString('zh-CN')}\n`;
+                if (task.finished_at) details += `完成时间: ${new Date(task.finished_at).toLocaleString('zh-CN')}\n`;
+                if (task.error_msg) details += `错误信息: ${task.error_msg}\n`;
+                if (task.result) details += `执行结果: ${JSON.stringify(task.result, null, 2)}\n`;
+
+                alert(details);
+            } catch (error) {
+                console.error('查看任务详情失败:', error);
+                alert('获取详情失败，请稍后重试');
+            }
+        }
+
+        // 页面加载完成后执行
+        document.addEventListener('DOMContentLoaded', () => {
+            loadTasks();
+            // 每隔30秒刷新一次
+            setInterval(loadTasks, 30000);
+        });
+    </script>
+</body>
+</html>

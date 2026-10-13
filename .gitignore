@@ -1,0 +1,18 @@
+# 敏感与本地数据（含 loginKey/助记词/会话，禁止推送）
+.env
+zmine.db
+*.db
+test_account_*.json
+TEST_ACCOUNT.md
+js_reverse_cache/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 系统
+.DS_Store

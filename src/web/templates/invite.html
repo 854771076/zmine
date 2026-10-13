@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>邀请矩阵 - ZMINE 自动化系统</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <nav class="bg-blue-600 text-white p-4 shadow-lg">
+        <div class="container mx-auto flex justify-between items-center">
+            <h1 class="text-2xl font-bold flex items-center">
+                <i class="fa fa-cogs mr-2"></i> ZMINE 自动化系统
+            </h1>
+            <div class="flex space-x-4">
+                <a href="/" class="hover:bg-blue-700 px-3 py-2 rounded transition">仪表盘</a>
+                <a href="/accounts" class="hover:bg-blue-700 px-3 py-2 rounded transition">账号管理</a>
+                <a href="/tasks" class="hover:bg-blue-700 px-3 py-2 rounded transition">任务管理</a>
+                <a href="/invite" class="bg-blue-700 px-3 py-2 rounded transition">邀请矩阵</a>
+                <a href="/settings" class="hover:bg-blue-700 px-3 py-2 rounded transition">系统设置</a>
+            </div>
+        </div>
+    </nav>
+
+    <main class="container mx-auto p-4 mt-6">
+        <!-- 统计卡片 -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div class="bg-white rounded-lg shadow p-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-500 text-sm">总邀请关系</p>
+                        <h3 class="text-3xl font-bold mt-1" id="total-invites">0</h3>
+                    </div>
+                    <div class="bg-purple-100 p-3 rounded-full">
+                        <i class="fa fa-users text-purple-600 text-2xl"></i>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-lg shadow p-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-500 text-sm">总邀请奖励</p>
+                        <h3 class="text-3xl font-bold mt-1" id="total-reward">0.00</h3>
+                    </div>
+                    <div class="bg-green-100 p-3 rounded-full">
+                        <i class="fa fa-diamond text-green-600 text-2xl"></i>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-lg shadow p-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-500 text-sm">平均邀请层级</p>
+                        <h3 class="text-3xl font-bold mt-1" id="avg-level">0</h3>
+                    </div>
+                    <div class="bg-blue-100 p-3 rounded-full">
+                        <i class="fa fa-sitemap text-blue-600 text-2xl"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 操作按钮 -->
+        <div class="flex justify-between items-center mb-6">
+            <h2 class="text-2xl font-bold">邀请矩阵管理</h2>
+            <button onclick="openGenerateModal()" class="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700 transition flex items-center">
+                <i class="fa fa-magic mr-2"></i> 生成平衡矩阵
+            </button>
+        </div>
+
+        <!-- 邀请关系列表 -->
+        <div class="bg-white rounded-lg shadow mb-6">
+            <div class="p-4 border-b">
+                <h3 class="text-lg font-semibold">邀请关系列表</h3>
+            </div>
+            <div class="p-4 overflow-x-auto">
+                <table class="min-w-full">
+                    <thead>
+                        <tr class="bg-gray-50">
+                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">ID</th>
+                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">邀请人ID</th>
+                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">被邀请人ID</th>
+                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">层级</th>
+                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">分成比例</th>
+                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">累计奖励</th>
+                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">创建时间</th>
+                        </tr>
+                    </thead>
+                    <tbody id="invite-table">
+                        <tr>
+                            <td colspan="7" class="px-4 py-8 text-center text-gray-500">加载中...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 邀请树可视化 -->
+        <div class="bg-white rounded-lg shadow">
+            <div class="p-4 border-b">
+                <h3 class="text-lg font-semibold">邀请树结构</h3>
+            </div>
+            <div class="p-4">
+                <div id="invite-tree" class="pl-4">
+                    <p class="text-gray-500 text-center py-8">暂无邀请关系</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- 生成矩阵模态框 -->
+    <div id="generate-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+        <div class="bg-white rounded-lg p-6 w-full max-w-md">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold">生成平衡邀请矩阵</h3>
+                <button onclick="closeGenerateModal()" class="text-gray-500 hover:text-gray-700">
+                    <i class="fa fa-times text-xl"></i>
+                </button>
+            </div>
+            <form id="generate-form" onsubmit="generateMatrix(event)">
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">新账号ID列表（用逗号分隔）</label>
+                    <textarea id="account_ids" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500" rows="4" placeholder="例如：1,2,3,4,5"></textarea>
+                </div>
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">根邀请人ID（可选）</label>
+                    <input type="number" id="root_inviter_id" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500" placeholder="留空则自动选择最优邀请人">
+                </div>
+                <div class="flex justify-end space-x-3">
+                    <button type="button" onclick="closeGenerateModal()" class="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50 transition">取消</button>
+                    <button type="submit" class="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition">生成</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // 加载统计数据
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/invite/statistics');
+                const data = await response.json();
+                document.getElementById('total-invites').textContent = data.total_invites || 0;
+                document.getElementById('total-reward').textContent = (data.total_reward || 0).toFixed(2);
+            } catch (error) {
+                console.error('加载统计数据失败:', error);
+            }
+        }
+
+        // 加载邀请关系列表
+        async function loadInviteRelations() {
+            try {
+                // 这里需要添加获取邀请关系的API
+                // 暂时使用模拟数据
+                const tbody = document.getElementById('invite-table');
+                tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-500">邀请关系API开发中...</td></tr>';
+            } catch (error) {
+                console.error('加载邀请关系失败:', error);
+                document.getElementById('invite-table').innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-red-500">加载失败</td></tr>';
+            }
+        }
+
+        // 打开生成矩阵模态框
+        function openGenerateModal() {
+            document.getElementById('generate-modal').classList.remove('hidden');
+            document.getElementById('generate-modal').classList.add('flex');
+        }
+
+        // 关闭生成矩阵模态框
+        function closeGenerateModal() {
+            document.getElementById('generate-modal').classList.add('hidden');
+            document.getElementById('generate-modal').classList.remove('flex');
+            document.getElementById('generate-form').reset();
+        }
+
+        // 生成邀请矩阵
+        async function generateMatrix(event) {
+            event.preventDefault();
+
+            const accountIdsText = document.getElementById('account_ids').value;
+            const rootInviterId = document.getElementById('root_inviter_id').value;
+
+            const account_ids = accountIdsText.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+
+            if (account_ids.length === 0) {
+                alert('请输入有效的账号ID列表');
+                return;
+            }
+
+            try {
+                const payload = {
+                    new_account_ids: account_ids
+                };
+
+                if (rootInviterId) {
+                    payload.root_inviter_id = parseInt(rootInviterId);
+                }
+
+                const response = await fetch('/api/invite/generate-matrix', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    alert(`邀请矩阵生成成功！共创建 ${result.relations_count} 条邀请关系。`);
+                    closeGenerateModal();
+                    loadStats();
+                    loadInviteRelations();
+                } else {
+                    const error = await response.json();
+                    alert(`生成失败: ${error.detail || '未知错误'}`);
+                }
+            } catch (error) {
+                console.error('生成邀请矩阵失败:', error);
+                alert('生成失败，请稍后重试');
+            }
+        }
+
+        // 页面加载完成后执行
+        document.addEventListener('DOMContentLoaded', () => {
+            loadStats();
+            loadInviteRelations();
+        });
+    </script>
+</body>
+</html>
