@@ -10,7 +10,12 @@ engine = create_async_engine(
     f"sqlite+aiosqlite:///{settings.db_path}",
     echo=settings.web_debug,
     future=True,
-    connect_args={"timeout": 30}  # 写锁竞争时排队等待，避免立即抛 database is locked
+    connect_args={"timeout": 30},  # 写锁竞争时排队等待，避免立即抛 database is locked
+    # 池容量必须覆盖 worker 并发任务数（每任务持有一个会话）+ web 请求，
+    # 默认 5+10 会导致任务拿不到连接超时炸掉并永久卡在 RUNNING
+    pool_size=40,
+    max_overflow=60,
+    pool_timeout=60
 )
 
 # 创建异步会话工厂

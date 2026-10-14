@@ -337,8 +337,35 @@ class TaskWorker:
     async def _process_task(self, task: Task) -> None:
         """处理单个任务（任务在认领阶段已置为RUNNING）"""
         async with self.queues[self._queue_name(task.task_type)]["semaphore"]:
-            async for db in get_db():
+            try:
+                async for db in get_db():
+                    await self._run_task_with_db(task)
+            except Exception as e:
+                # 获取数据库会话本身失败（连接池耗尽超时等）：异常发生在任务逻辑的
+                # try 之外，若不处理任务会永久卡在 RUNNING（claim 只认 PENDING，
+                # 无人再认领）。归还到等待队列，消耗一次重试
                 try:
+                    async for db in get_db():
+                        await db.execute(
+                            update(Task)
+                            .where(Task.id == task.id, Task.status == TaskStatus.RUNNING)
+                            .values(
+                                retry_count=Task.retry_count + 1,
+                                status=TaskStatus.PENDING,
+                                error_msg=f"worker internal error: {str(e)[:150]}",
+                                updated_at=datetime.now()
+                            )
+                        )
+                        await db.commit()
+                        break
+                except Exception:
+                    # 连回收会话都拿不到时只能留给下次启动的孤儿回收兜底
+                    print(f"⚠️ Task {task.id} stuck in RUNNING, orphan recovery will reset it on restart")
+
+    async def _run_task_with_db(self, task: Task) -> None:
+        """在数据库会话中执行任务逻辑（成功/失败/重试状态更新）"""
+        async for db in get_db():
+            try:
                     # 获取关联账号
                     result = await db.execute(
                         select(Account).where(Account.id == task.account_id)
@@ -392,29 +419,29 @@ class TaskWorker:
                         result=task_result
                     )
 
-                except Exception as e:
-                    # 重试次数检查
-                    if task.retry_count < task.max_retries:
-                        # 增加重试次数，状态重置为等待
-                        await db.execute(
-                            update(Task)
-                            .where(Task.id == task.id)
-                            .values(
-                                retry_count=task.retry_count + 1,
-                                status=TaskStatus.PENDING,
-                                error_msg=str(e),
-                                updated_at=datetime.now()
-                            )
+            except Exception as e:
+                # 重试次数检查
+                if task.retry_count < task.max_retries:
+                    # 增加重试次数，状态重置为等待
+                    await db.execute(
+                        update(Task)
+                        .where(Task.id == task.id)
+                        .values(
+                            retry_count=task.retry_count + 1,
+                            status=TaskStatus.PENDING,
+                            error_msg=str(e),
+                            updated_at=datetime.now()
                         )
-                        await db.commit()
-                    else:
-                        # 超过最大重试次数，标记为失败
-                        await self._update_task_status(
-                            db,
-                            task.id,
-                            TaskStatus.FAILED,
-                            error_msg=str(e)
-                        )
+                    )
+                    await db.commit()
+                else:
+                    # 超过最大重试次数，标记为失败
+                    await self._update_task_status(
+                        db,
+                        task.id,
+                        TaskStatus.FAILED,
+                        error_msg=str(e)
+                    )
 
     async def _claim_pending_tasks(self, db: AsyncSession, limit: int = 100, task_types: tuple = ()) -> List[Task]:
         """原子认领待执行任务
