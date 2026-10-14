@@ -10,6 +10,11 @@ from fake_useragent import UserAgent
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from src.config.settings import settings
 
+# 模块级单例：UserAgent() 初始化是 CPU 密集操作（解析内置浏览器数据），
+# 放在 client.__init__ 里会导致 worker 每个任务都阻塞事件循环一次，
+# web 接口出现随机 1 秒级尖刺。随机化发生在 .random 属性调用时，共享实例无副作用
+_UA = UserAgent()
+
 class ZMineAPIError(Exception):
     """自定义API异常"""
     def __init__(self, message: str, status_code: Optional[int] = None, response: Optional[Dict[str, Any]] = None):
@@ -33,7 +38,7 @@ class ZMineClient:
         self.proxy_url = proxy_url or settings.proxy_url
         self._is_socks = False
         self.session: Optional[ClientSession] = None
-        self.ua = UserAgent()
+        self.ua = _UA
         self.cookies = cookies or {}
         self.token = token
         self.login_key = login_key
