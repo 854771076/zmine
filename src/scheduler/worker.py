@@ -1,5 +1,6 @@
 import asyncio
 import json
+import random
 from datetime import datetime
 from typing import Callable, Dict, Any, List, Optional
 from enum import IntEnum
@@ -9,7 +10,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 from src.config.settings import settings
 from src.db.models import Task, Account
 from src.db.session import get_db
-from src.site.client import ZMineClient, ZMineAPIError
+from src.site.client import ZMineClient, ZMineAPIError, solve_mind_task
 
 class TaskStatus(IntEnum):
     """任务状态枚举"""
@@ -27,6 +28,7 @@ class TaskType(IntEnum):
     MINING = 4
     CLAIM_REWARD = 5
     UPDATE_PROFILE = 6
+    MIND = 7
 
 class TaskWorker:
     """任务工作器"""
@@ -45,6 +47,7 @@ class TaskWorker:
         self.task_handlers[TaskType.MINING] = self._handle_mining_task
         self.task_handlers[TaskType.CLAIM_REWARD] = self._handle_claim_reward_task
         self.task_handlers[TaskType.UPDATE_PROFILE] = self._handle_update_profile_task
+        self.task_handlers[TaskType.MIND] = self._handle_mind_task
 
     def register_handler(self, task_type: int, handler: Callable) -> None:
         """注册自定义任务处理器"""
@@ -218,6 +221,69 @@ class TaskWorker:
             await db.commit()
 
             return result
+
+    async def _handle_mind_task(self, task: Task, account: Account, db: AsyncSession) -> Dict[str, Any]:
+        """处理mind答题任务：取题 -> 本地解题 -> 提交（每日上限12题，答对+5000mH算力24h）"""
+        answered = 0
+        correct = 0
+        credited_mh = 0.0
+        last_stats: Dict[str, Any] = {}
+        detail: List[Dict[str, Any]] = []
+
+        async with await self._get_account_client(account) as client:
+            cooldown_budget = 15 * 60  # 单次任务最多累计等待冷却15分钟（答错触发约10分钟冷却）
+            for _ in range(15):  # 站点每日上限12题（答对才计入），留少量余量
+                data = await client.get_mind_task()
+                last_stats = data.get("stats") or last_stats
+                mind_task = data.get("task")
+                if not mind_task:
+                    # 冷却期内取不到题（答错触发的反作弊冷却），等待冷却结束后重试
+                    cooldown_s = (last_stats.get("cooldownLeftMs") or 0) / 1000
+                    if 0 < cooldown_s < cooldown_budget:
+                        cooldown_budget -= cooldown_s
+                        await asyncio.sleep(cooldown_s + 2)
+                        continue
+                    # 今日已完成（remainingToday=0）、冷却过长或站点暂无题目
+                    break
+
+                answer = solve_mind_task(mind_task.get("prompt") or "", mind_task.get("options") or [])
+                # 模拟阅读耗时，避免站点 tooFast 判定（token 签发15分钟内有效，充裕）
+                await asyncio.sleep(random.uniform(4, 9))
+                resp = await client.answer_mind_task(mind_task["token"], answer)
+
+                answered += 1
+                is_correct = bool(resp.get("correct"))
+                correct += 1 if is_correct else 0
+                credited_mh += float(resp.get("creditedMh") or 0)
+                detail.append({
+                    "slug": mind_task.get("slug"),
+                    "answer": answer,
+                    "correct": is_correct,
+                })
+
+                stats = resp.get("stats") or {}
+                if stats:
+                    last_stats = stats
+                if (stats.get("cooldownLeftMs") or 0) > 0:
+                    await asyncio.sleep(stats["cooldownLeftMs"] / 1000 + 1)
+                if (stats.get("remainingToday") or 0) <= 0:
+                    break
+
+        if answered:
+            await db.execute(
+                update(Account)
+                .where(Account.id == account.id)
+                .values(updated_at=datetime.now())
+            )
+            await db.commit()
+
+        return {
+            "answered": answered,
+            "correct": correct,
+            "creditedMh": credited_mh,
+            "stats": last_stats,
+            "detail": detail[:20],
+        }
 
     @retry(
         stop=stop_after_attempt(settings.task_max_retries),

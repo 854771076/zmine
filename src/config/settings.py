@@ -45,5 +45,6 @@ class Settings(BaseSettings):
     claim_interval: int = 240  # 自动领取奖励间隔（分钟）
     task_interval: int = 360  # 自动完成任务间隔（分钟）
     sync_interval: int = 120  # 自动同步账号信息间隔（分钟）
+    mind_interval: int = 120  # mind答题间隔（分钟，冷却中断后靠下一轮继续完成当日额度）
 
 settings = Settings()

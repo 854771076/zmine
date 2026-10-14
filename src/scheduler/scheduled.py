@@ -101,17 +101,44 @@ class ScheduledTaskManager:
                 )
             print(f"ℹ️  已为 {len(accounts)} 个账号调度信息同步任务")
 
+    async def _schedule_mind_tasks(self):
+        """调度mind答题任务（/app/si 每日12题，答对得算力）"""
+        async for db in get_db():
+            accounts = await self._get_active_accounts(db)
+            for account in accounts:
+                # 检查是否有未完成的答题任务
+                existing = await db.execute(
+                    select(Task).where(
+                        Task.account_id == account.id,
+                        Task.task_type == TaskType.MIND,
+                        Task.status.in_([0, 1])
+                    )
+                )
+                if existing.scalar_one_or_none():
+                    continue
+
+                # 创建答题任务
+                await create_task(
+                    account_id=account.id,
+                    task_type=TaskType.MIND,
+                    task_name=f"Mind答题: {account.username}",
+                    scheduled_at=datetime.now()
+                )
+            print(f"ℹ️  已为 {len(accounts)} 个账号调度 mind 答题任务")
+
     async def run(self):
         """运行定时任务管理器"""
         self.running = True
         print("⏰ 定时任务管理器已启动")
         print(f"   挖矿间隔: {settings.mining_interval} 分钟")
         print(f"   领取奖励间隔: {settings.claim_interval} 分钟")
+        print(f"   mind答题间隔: {settings.mind_interval} 分钟")
         print(f"   信息同步间隔: {settings.sync_interval} 分钟")
 
         # 记录上次执行时间
         last_mining = datetime.min
         last_claim = datetime.min
+        last_mind = datetime.min
         last_sync = datetime.min
 
         while self.running:
@@ -134,6 +161,14 @@ class ScheduledTaskManager:
                     print(f"❌ 调度领取任务失败: {str(e)}")
 
             # 日常任务（站点无任务API，已移除COMPLETE_TASK调度）
+
+            # mind 答题（每日12题，答对得算力，站点每日重置）
+            if now - last_mind > timedelta(minutes=settings.mind_interval):
+                try:
+                    await self._schedule_mind_tasks()
+                    last_mind = now
+                except Exception as e:
+                    print(f"❌ 调度mind答题任务失败: {str(e)}")
 
             # 信息同步
             if now - last_sync > timedelta(minutes=settings.sync_interval):

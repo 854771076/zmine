@@ -1,6 +1,7 @@
 import asyncio
 import json
 import random
+import re
 import aiohttp
 from typing import Optional, Dict, Any, Union
 from aiohttp import ClientSession, ClientResponse, CookieJar
@@ -314,3 +315,200 @@ class ZMineClient:
                 for r in (overview.get("recentRewards") or [])
             ],
         }
+
+    # -------------------------- Mind 答题（/app/si 每日12题，答对 +5000mH 算力24h） --------------------------
+
+    async def get_mind_task(self) -> Dict[str, Any]:
+        """获取当前答题任务
+        GET /api/v1/si/tasks/next
+        返回：{"task": {"id","slug","kind","prompt","options","difficulty","token"} | None,
+              "reason": None|"...", "stats": {"remainingToday","cap","cooldownLeftMs",...}}
+        task 为 null 表示今日已完成或暂无任务（原因见 reason）
+        """
+        return await self.get("/api/v1/si/tasks/next")
+
+    async def answer_mind_task(self, token: str, answer: int) -> Dict[str, Any]:
+        """提交答案
+        POST /api/v1/si/tasks/answer {"token": <题目JWT>, "answer": <选项下标，0-based>}
+        返回：{"correct","correctAnswer","tooFast","creditedMh","stats"}
+        注意：answer 为 0-based（页面按键是1-based，API是0-based，已实测验证：
+        两选项verify题提交 answer=1 表示第二个选项"Incorrect"）
+        token 签发后15分钟内有效
+        """
+        return await self.post(
+            "/api/v1/si/tasks/answer",
+            json_data={"token": token, "answer": answer}
+        )
+
+
+# -------------------------- Mind 题目本地求解 --------------------------
+
+_NUM_RE = r'\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?'
+_WORD_NUM = {
+    'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
+    'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
+    'eleven': 11, 'twelve': 12, 'twenty': 20, 'fifty': 50, 'hundred': 100,
+    'thousand': 1000, 'dozen': 12, 'half': 0.5,
+}
+
+
+def _parse_num(s: str) -> float:
+    return float(s.replace(',', ''))
+
+
+def _stem(w: str) -> str:
+    """极简词干化（复数/时态），用于阅读理解题的词重叠匹配"""
+    for suf in ('ing', 'ies', 'ed', 'es', 's'):
+        if w.endswith(suf) and len(w) > len(suf) + 2:
+            return w[:-len(suf)] + ('y' if suf == 'ies' else '')
+    return w
+
+
+def solve_mind_task(prompt: str, options: list) -> int:
+    """本地解答 mind 题目，返回 0-based 选项下标（无法求解时返回 0）
+
+    已知题型（slug 前缀 -> 模板）：
+    - gen-mul / arith（verify）：算术断言 "An assistant claims: 35 x 54 = 1,920."
+    - gen-zat（verify/choose）：ZEC 与 zatoshi 换算（1 ZEC = 1e8 zatoshi）
+    - gen-blocks / gen-epoch（choose）：时间-产出换算
+    - gen-pct（choose）：百分比
+    - read-*（choose）：阅读理解，按与题干文本的词重叠近似匹配
+    注意：答错会触发约10分钟站点冷却，无法求解时宁可保守
+    """
+    opts = [str(o).strip() for o in (options or [])]
+    try:
+        idx = _solve_mind(prompt or '', opts)
+        return idx if 0 <= idx < len(opts) else 0
+    except Exception:
+        return 0
+
+
+def _solve_mind(prompt: str, options: list) -> int:
+    text = prompt.replace('×', ' x ').replace('÷', ' / ').replace('−', '-')
+    low = text.lower()
+    lowers = [o.lower() for o in options]
+
+    # 阅读理解题：与题干文本词重叠最多的选项最可能与文意一致
+    if 'text:' in low or 'which is consistent' in low or 'according to the text' in low:
+        m = re.search(r"Text:\s*['\"“”]?(.+?)['\"“”]?\s*(?:Which|According|What)", text, re.S)
+        body = (m.group(1) if m else text).lower()
+        stop = {'the', 'a', 'an', 'of', 'to', 'is', 'are', 'be', 'can', 'until',
+                'or', 'and', 'from', 'what', 'you', 'in', 'for', 'on', 'after', 'it'}
+        words = {_stem(w.strip('.,!?;:"\'()')) for w in body.split()} - stop
+        best, best_score = 0, -1
+        for i, o in enumerate(options):
+            ow = {_stem(w.strip('.,!?;:"\'()')) for w in o.lower().split()} - stop
+            score = len(words & ow)
+            if score > best_score:
+                best_score, best = score, i
+        return best
+
+    # 断言题：先验算术 "A op B = C"，再验单位换算 "A ZEC = B zatoshi"
+    if 'correct' in lowers and 'incorrect' in lowers:
+        m = re.search(rf'({_NUM_RE})\s*([+\-x*/])\s*({_NUM_RE})\s*=\s*({_NUM_RE})', text)
+        if m:
+            a, op, b, c = (
+                _parse_num(m.group(1)), m.group(2),
+                _parse_num(m.group(3)), _parse_num(m.group(4)),
+            )
+            left = {'+': a + b, '-': a - b, 'x': a * b, '*': a * b,
+                    '/': a / b if b else None}.get(op)
+            claim = left is not None and abs(left - c) < 0.01
+            return lowers.index('correct' if claim else 'incorrect')
+
+        claim_nums = [_parse_num(x) for x in re.findall(_NUM_RE, text)]
+        if len(claim_nums) >= 2:
+            a, c = claim_nums[0], claim_nums[-1]
+            claim = any(
+                abs(a * k - c) < 0.01 or abs(c * k - a) < 0.01
+                for k in (1e8, 1e6, 1e3, 1024, 86400, 3600, 60, 24, 100)
+            )
+            return lowers.index('correct' if claim else 'incorrect')
+        return 0
+
+    # 数值题：提取题面数字（含英文数字词），按常见运算优先级枚举候选并匹配选项
+    targets: Dict[float, int] = {}
+    for i, o in enumerate(options):
+        if re.fullmatch(rf'{_NUM_RE}(?!\d)', o):
+            targets.setdefault(_parse_num(o), i)
+    if not targets:
+        return 0
+
+    nums = [_parse_num(x) for x in re.findall(_NUM_RE, text)]
+    # 英文数字词（one/two...）兜底：题面无数字时直接用，否则仅当真实数字候选全部落空时才参与
+    word_nums = [v for w, v in _WORD_NUM.items() if re.search(rf'\b{w}\b', low)]
+    base_nums = nums or word_nums
+    extra_nums = word_nums if nums else []
+    if not base_nums:
+        return 0
+
+    def gen(vals: list) -> list:
+        out: list = []
+
+        def add(v) -> None:
+            if v is not None and abs(v) < 1e15:
+                out.append(v)
+
+        # 1) ZEC<->zatoshi 换算类（1 ZEC = 1e8 zatoshi）
+        if 'zat' in low or 'zec' in low:
+            for a in vals:
+                add(a * 1e8)
+                add(a / 1e8)
+                add(a * 1e6)
+                add(a / 1e6)
+        # 2) 速率->总量换算（每 X 秒/分钟产出 Y，问一天/一小时多少个）
+        for b in vals:
+            if b:
+                add(86400 / b)
+                add(3600 / b)
+                add(60 / b)
+        # 3) 乘积及其换算（epoch 类：块数x间隔 -> 时长）；跳过自配对避免平方项撞干扰项
+        for i, a in enumerate(vals):
+            for j, b in enumerate(vals):
+                if i == j:
+                    continue
+                p = a * b
+                add(p)
+                add(p / 60)
+                add(p / 3600)
+                add(p / 86400)
+                add(p * 24)
+        # 4) 单数倍增/换算
+        for a in vals:
+            add(a * 24)
+            add(a * 60)
+            add(a * 3600)
+            add(a * 86400)
+            if a:
+                add(a / 24)
+                add(a / 60)
+                add(a / 3600)
+        # 5) 比值与和差
+        for a in vals:
+            for b in vals:
+                if b:
+                    add(a / b)
+                    add(b / a)
+                add(a + b)
+                add(a - b)
+                add(b - a)
+        # 6) 倍数/百分比类
+        for a in vals:
+            if 'half' in low or 'halv' in low:
+                add(a / 2)
+            if 'double' in low or 'twice' in low:
+                add(a * 2)
+            if '%' in text:
+                for x in vals:
+                    add(a * x / 100)
+                    add(a * (1 - x / 100))
+                    add(a * (1 + x / 100))
+        return out
+
+    candidates = gen(base_nums) + (gen(base_nums + extra_nums) if extra_nums else [])
+
+    for v in candidates:
+        for tv, idx in targets.items():
+            if abs(v - tv) < 0.01:
+                return idx
+    return 0
