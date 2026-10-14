@@ -5,6 +5,7 @@ import re
 import aiohttp
 from typing import Optional, Dict, Any, Union
 from aiohttp import ClientSession, ClientResponse, CookieJar
+from aiohttp_socks import ProxyConnector
 from fake_useragent import UserAgent
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from src.config.settings import settings
@@ -30,6 +31,7 @@ class ZMineClient:
     ):
         self.base_url = base_url or settings.site_url
         self.proxy_url = proxy_url or settings.proxy_url
+        self._is_socks = False
         self.session: Optional[ClientSession] = None
         self.ua = UserAgent()
         self.cookies = cookies or {}
@@ -58,10 +60,14 @@ class ZMineClient:
     async def __aenter__(self) -> "ZMineClient":
         """异步上下文管理器入口"""
         cookie_jar = CookieJar(unsafe=True)
+        # SOCKS 代理须经 connector 实现（aiohttp 的 proxy= 参数仅支持 HTTP 代理）
+        self._is_socks = bool(self.proxy_url and self.proxy_url.startswith(("socks4://", "socks5://")))
+        connector = ProxyConnector.from_url(self.proxy_url) if self._is_socks else None
         self.session = ClientSession(
             base_url=self.base_url,
             cookie_jar=cookie_jar,
-            headers=self.default_headers
+            headers=self.default_headers,
+            connector=connector
         )
 
         # 设置初始cookies（站点认证基于 zmine_session cookie，非 Bearer token）
@@ -124,7 +130,7 @@ class ZMineClient:
                 data=data,
                 json=json_data,
                 headers=request_headers,
-                proxy=self.proxy_url,
+                proxy=None if self._is_socks else self.proxy_url,
                 timeout=settings.request_timeout,
                 **kwargs
             )

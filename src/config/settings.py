@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     request_delay_min: float = 1.0
     request_delay_max: float = 3.0
 
+    # 任务队列分离（按类型独立并发槽，互不抢占）
+    queue_main: int = 25   # 挖矿/领取/同步（快任务）
+    queue_mind: int = 5    # Mind答题（慢任务：答题延迟+冷却等待）
+    queue_auth: int = 5    # 注册/登录（限流敏感端点）
+
     # 数据库配置
     db_path: str = "zmine.db"
 

@@ -36,10 +36,37 @@ class TaskWorker:
 
     def __init__(self, max_concurrent: Optional[int] = None):
         self.max_concurrent = max_concurrent or settings.max_concurrent
-        self.semaphore = asyncio.Semaphore(self.max_concurrent)
+        # 队列分离：按任务类型独立并发槽，慢任务（Mind 冷却等待）不再堵住快任务
+        self.queues: Dict[str, Dict[str, Any]] = {
+            "main": {  # 挖矿/领取/同步（快任务）
+                "cap": settings.queue_main,
+                "types": (TaskType.MINING, TaskType.CLAIM_REWARD, TaskType.UPDATE_PROFILE),
+                "inflight": set(),
+                "semaphore": asyncio.Semaphore(settings.queue_main),
+            },
+            "mind": {  # Mind答题（慢任务：答题延迟+冷却等待）
+                "cap": settings.queue_mind,
+                "types": (TaskType.MIND,),
+                "inflight": set(),
+                "semaphore": asyncio.Semaphore(settings.queue_mind),
+            },
+            "auth": {  # 注册/登录（限流敏感端点 auth/*）
+                "cap": settings.queue_auth,
+                "types": (TaskType.REGISTER, TaskType.LOGIN),
+                "inflight": set(),
+                "semaphore": asyncio.Semaphore(settings.queue_auth),
+            },
+        }
         self.task_handlers: Dict[int, Callable] = {}
         self._register_default_handlers()
         self.running = False
+
+    def _queue_name(self, task_type: int) -> str:
+        if task_type == TaskType.MIND:
+            return "mind"
+        if task_type in (TaskType.REGISTER, TaskType.LOGIN):
+            return "auth"
+        return "main"
 
     def _register_default_handlers(self) -> None:
         """注册默认任务处理器"""
@@ -309,7 +336,7 @@ class TaskWorker:
 
     async def _process_task(self, task: Task) -> None:
         """处理单个任务（任务在认领阶段已置为RUNNING）"""
-        async with self.semaphore:
+        async with self.queues[self._queue_name(task.task_type)]["semaphore"]:
             async for db in get_db():
                 try:
                     # 获取关联账号
@@ -348,6 +375,10 @@ class TaskWorker:
                             return
                         if e.status_code != 401 or task.task_type == TaskType.LOGIN:
                             raise
+                        # password 存 loginKey；PENDING_REGISTER 说明注册任务未完成，
+                        # 拿占位符去 login 必然 400，直接报错走正常重试
+                        if not account.password or account.password == "PENDING_REGISTER":
+                            raise ValueError(f"Account not registered yet: {account.username}")
                         # 用 loginKey 重新登录刷新 zmine_session，持久化后重试
                         await self._handle_login_task(task, account, db)
                         await db.refresh(account)
@@ -385,22 +416,26 @@ class TaskWorker:
                             error_msg=str(e)
                         )
 
-    async def _claim_pending_tasks(self, db: AsyncSession, limit: int = 100) -> List[Task]:
+    async def _claim_pending_tasks(self, db: AsyncSession, limit: int = 100, task_types: tuple = ()) -> List[Task]:
         """原子认领待执行任务
         拾取与置RUNNING在一条 UPDATE 中完成（WHERE status=PENDING 保证只被认领一次），
         防止多轮轮询或多进程重复拾取同一批任务
+        task_types 非空时只认领指定类型（队列分离拾取）
         """
         now = datetime.now()
+        filters = [
+            Task.status == TaskStatus.PENDING,
+            # scheduled_at 为空表示立即执行，否则到计划时间才执行
+            or_(
+                Task.scheduled_at.is_(None),
+                Task.scheduled_at <= now
+            )
+        ]
+        if task_types:
+            filters.append(Task.task_type.in_(task_types))
         result = await db.execute(
             select(Task)
-            .where(
-                Task.status == TaskStatus.PENDING,
-                # scheduled_at 为空表示立即执行，否则到计划时间才执行
-                or_(
-                    Task.scheduled_at.is_(None),
-                    Task.scheduled_at <= now
-                )
-            )
+            .where(*filters)
             .order_by(Task.created_at.asc())
             .limit(limit)
         )
@@ -443,18 +478,30 @@ class TaskWorker:
 
         while self.running:
             try:
-                async for db in get_db():
-                    # 原子认领待执行任务（认领即置RUNNING，其他轮询不会重复拾取）
-                    pending_tasks = await self._claim_pending_tasks(db, batch_size)
+                # 队列分离 + 滚动窗口：每类任务独立并发上限，未满就持续补位。
+                # 快任务队列（main）优先拾取，慢任务（mind）与限流敏感任务（auth）
+                # 各占独立槽位，互不抢占
+                claimed_total = 0
+                for qname, queue in self.queues.items():
+                    queue["inflight"] = {f for f in queue["inflight"] if not f.done()}
+                    if len(queue["inflight"]) >= queue["cap"]:
+                        continue
+                    async for db in get_db():
+                        claimed = await self._claim_pending_tasks(
+                            db, queue["cap"] - len(queue["inflight"]), queue["types"]
+                        )
+                        for task in claimed:
+                            fut = asyncio.create_task(self._process_task(task))
+                            queue["inflight"].add(fut)
+                        claimed_total += len(claimed)
+                        break
 
-                    if pending_tasks:
-                        print(f"Claimed {len(pending_tasks)} tasks, processing...")
-                        # 并发处理任务
-                        tasks = [asyncio.create_task(self._process_task(task)) for task in pending_tasks]
-                        await asyncio.gather(*tasks, return_exceptions=True)
+                if claimed_total:
+                    print(f"Claimed {claimed_total} tasks, inflight=" +
+                          "/".join(str(len(q["inflight"])) for q in self.queues.values()))
 
-                    # 等待轮询间隔
-                    await asyncio.sleep(poll_interval)
+                # 等待轮询间隔
+                await asyncio.sleep(poll_interval)
 
             except Exception as e:
                 print(f"Worker loop error: {str(e)}")

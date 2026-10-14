@@ -9,7 +9,8 @@ from src.db.models import Base
 engine = create_async_engine(
     f"sqlite+aiosqlite:///{settings.db_path}",
     echo=settings.web_debug,
-    future=True
+    future=True,
+    connect_args={"timeout": 30}  # 写锁竞争时排队等待，避免立即抛 database is locked
 )
 
 # 创建异步会话工厂
@@ -24,6 +25,8 @@ AsyncSessionLocal = sessionmaker(
 async def init_db() -> None:
     """初始化数据库表"""
     async with engine.begin() as conn:
+        # WAL 模式：读写不互斥，web 统计轮询与 worker 高频写入可并行
+        await conn.exec_driver_sql("PRAGMA journal_mode=WAL")
         await conn.run_sync(Base.metadata.create_all)
         # create_all 不会给已存在的表加列，这里做简单的幂等列迁移
         if not await _has_column(conn, "tasks", "updated_at"):
