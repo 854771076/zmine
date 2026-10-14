@@ -1,12 +1,13 @@
 import asyncio
 import json
 import random
-from datetime import datetime
+import re
+from datetime import datetime, timedelta
 from typing import Callable, Dict, Any, List, Optional
 from enum import IntEnum
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, or_
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception, retry_if_exception_type
 from src.config.settings import settings
 from src.db.models import Task, Account
 from src.db.session import get_db
@@ -285,10 +286,17 @@ class TaskWorker:
             "detail": detail[:20],
         }
 
+    def _is_retryable(e: BaseException) -> bool:
+        # 429 限流不是瞬时错误（站点冷却常达 30-60 分钟），
+        # 内层立即重试只会连续撞墙，交给 _process_task 按站点指示推迟
+        if isinstance(e, ZMineAPIError) and e.status_code == 429:
+            return False
+        return isinstance(e, (ZMineAPIError, asyncio.TimeoutError))
+
     @retry(
         stop=stop_after_attempt(settings.task_max_retries),
         wait=wait_exponential(multiplier=1, min=2, max=10),
-        retry=retry_if_exception_type((ZMineAPIError, asyncio.TimeoutError)),
+        retry=retry_if_exception(_is_retryable),
         reraise=True
     )
     async def _execute_task(self, task: Task, account: Account, db: AsyncSession) -> Dict[str, Any]:
@@ -320,6 +328,24 @@ class TaskWorker:
                     try:
                         task_result = await self._execute_task(task, account, db)
                     except ZMineAPIError as e:
+                        if e.status_code == 429:
+                            # 站点限流：按响应里的 retryAfterSeconds 推迟任务到点再跑，
+                            # 不消耗重试次数（否则限流期会把 max_retries 烧光变 FAILED）
+                            m = re.search(r'"retryAfterSeconds":(\d+)', str(e))
+                            delay = int(m.group(1)) + 60 if m else 3600
+                            await db.execute(
+                                update(Task)
+                                .where(Task.id == task.id)
+                                .values(
+                                    status=TaskStatus.PENDING,
+                                    scheduled_at=datetime.now() + timedelta(seconds=delay),
+                                    error_msg=f"rate_limited, deferred {delay}s: {str(e)[:200]}",
+                                    updated_at=datetime.now()
+                                )
+                            )
+                            await db.commit()
+                            print(f"⏳ Task {task.id} deferred {delay}s (rate limited)")
+                            return
                         if e.status_code != 401 or task.task_type == TaskType.LOGIN:
                             raise
                         # 用 loginKey 重新登录刷新 zmine_session，持久化后重试

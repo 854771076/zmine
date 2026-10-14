@@ -20,9 +20,14 @@ class ScheduledTaskManager:
         self.tasks = []
 
     async def _get_active_accounts(self, db: AsyncSession) -> List[Account]:
-        """获取所有活跃账号"""
+        """获取所有活跃且已注册（有站点会话）的账号
+        cookies 为空说明注册/登录任务尚未完成，此时排业务任务只会 401→重登→429 空转
+        """
         result = await db.execute(
-            select(Account).where(Account.status == 1)
+            select(Account).where(
+                Account.status == 1,
+                Account.cookies.isnot(None)
+            )
         )
         return list(result.scalars().all())
 

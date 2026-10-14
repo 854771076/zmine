@@ -7,7 +7,7 @@ import asyncio
 import argparse
 import sys
 from src.config.settings import settings
-from src.db.session import init_db
+from src.db.session import init_db, engine
 from src.scheduler.worker import TaskWorker
 
 def main():
@@ -103,13 +103,15 @@ def main():
             except (KeyboardInterrupt, asyncio.CancelledError):
                 pass
             finally:
-                # 统一收尾：先停循环再取消协程，确保 db 连接正确关闭，
-                # 避免 aiosqlite 线程在解释器退出时崩溃
+                # 统一收尾：先取消协程，再在事件循环存活时释放数据库连接池。
+                # 缺少 engine.dispose() 时，池中 aiosqlite 连接会被拖到解释器退出
+                # 阶段强拆，触发 do_terminate 的 CancelledError 崩溃日志
                 worker.stop()
                 scheduler.stop()
                 for t in (worker_task, scheduler_task, server_task):
                     t.cancel()
                 await asyncio.gather(worker_task, scheduler_task, server_task, return_exceptions=True)
+                await engine.dispose()
                 print("System stopped.")
 
         asyncio.run(run_all())

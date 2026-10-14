@@ -43,15 +43,15 @@
                 <table class="min-w-full">
                     <thead>
                         <tr class="bg-gray-50">
-                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">ID</th>
-                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">用户名</th>
+                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500 cursor-pointer hover:text-gray-700 select-none" onclick="sortBy('id')">ID <span id="sort-icon-id"></span></th>
+                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500 cursor-pointer hover:text-gray-700 select-none" onclick="sortBy('username')">用户名 <span id="sort-icon-username"></span></th>
                             <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">邀请码</th>
                             <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">邀请人ID</th>
-                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">当前积分</th>
-                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">累计积分</th>
-                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">挖矿状态</th>
-                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">状态</th>
-                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">创建时间</th>
+                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500 cursor-pointer hover:text-gray-700 select-none" onclick="sortBy('points')">当前积分 <span id="sort-icon-points"></span></th>
+                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500 cursor-pointer hover:text-gray-700 select-none" onclick="sortBy('total_points')">累计积分 <span id="sort-icon-total_points"></span></th>
+                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500 cursor-pointer hover:text-gray-700 select-none" onclick="sortBy('mining_status')">挖矿状态 <span id="sort-icon-mining_status"></span></th>
+                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500 cursor-pointer hover:text-gray-700 select-none" onclick="sortBy('status')">状态 <span id="sort-icon-status"></span></th>
+                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-500 cursor-pointer hover:text-gray-700 select-none" onclick="sortBy('created_at')">创建时间 <span id="sort-icon-created_at"></span></th>
                             <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">操作</th>
                         </tr>
                     </thead>
@@ -61,6 +61,21 @@
                         </tr>
                     </tbody>
                 </table>
+            </div>
+            <!-- 分页 -->
+            <div class="p-4 border-t flex items-center justify-between flex-wrap gap-2">
+                <div class="text-sm text-gray-500">
+                    共 <span id="page-total">0</span> 条 · 第 <span id="page-current">1</span> / <span id="page-pages">1</span> 页
+                </div>
+                <div class="flex items-center gap-2">
+                    <select id="page-size" onchange="changePageSize()" class="px-2 py-1 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="20">20 条/页</option>
+                        <option value="50">50 条/页</option>
+                        <option value="100">100 条/页</option>
+                    </select>
+                    <button onclick="gotoPage(currentPage - 1)" id="btn-prev" class="px-3 py-1 border border-gray-300 rounded-md text-sm hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">上一页</button>
+                    <button onclick="gotoPage(currentPage + 1)" id="btn-next" class="px-3 py-1 border border-gray-300 rounded-md text-sm hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">下一页</button>
+                </div>
             </div>
         </div>
     </main>
@@ -92,6 +107,38 @@
                     <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition">添加</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- 账号详情模态框 -->
+    <div id="detail-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+        <div class="bg-white rounded-lg w-full max-w-2xl max-h-[85vh] overflow-y-auto">
+            <div class="flex justify-between items-center p-6 pb-4 sticky top-0 bg-white border-b">
+                <h3 class="text-xl font-bold">账号详情 <span id="detail-title" class="text-gray-400 font-normal"></span></h3>
+                <button onclick="closeDetailModal()" class="text-gray-500 hover:text-gray-700">
+                    <i class="fa fa-times text-xl"></i>
+                </button>
+            </div>
+            <div class="p-6 pt-4">
+                <div id="detail-info" class="grid grid-cols-2 gap-x-6 gap-y-3 text-sm mb-6">加载中...</div>
+                <h4 class="font-bold mb-3">最近任务</h4>
+                <div class="bg-gray-50 rounded-lg overflow-x-auto">
+                    <table class="min-w-full text-sm">
+                        <thead>
+                            <tr class="bg-gray-100 text-gray-500">
+                                <th class="px-3 py-2 text-left font-medium">ID</th>
+                                <th class="px-3 py-2 text-left font-medium">名称</th>
+                                <th class="px-3 py-2 text-left font-medium">类型</th>
+                                <th class="px-3 py-2 text-left font-medium">状态</th>
+                                <th class="px-3 py-2 text-left font-medium">时间</th>
+                            </tr>
+                        </thead>
+                        <tbody id="detail-tasks">
+                            <tr><td colspan="5" class="px-3 py-4 text-center text-gray-400">加载中...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -129,13 +176,44 @@
     </div>
 
     <script>
+        // 列表状态
+        let currentPage = 1;
+        let pageSize = 20;
+        let totalCount = 0;
+        let currentSortBy = 'id';
+        let currentSortOrder = 'desc';
+
+        // 任务类型/状态映射（与 worker 枚举一致）
+        const typeMap = {1: '注册', 2: '登录', 4: '挖矿', 5: '领取收益', 6: '同步资料', 7: 'Mind答题'};
+        const taskStatusMap = {0: '等待中', 1: '运行中', 2: '成功', 3: '失败', 4: '已取消'};
+        const taskStatusClass = {
+            0: 'bg-yellow-100 text-yellow-800', 1: 'bg-blue-100 text-blue-800',
+            2: 'bg-green-100 text-green-800', 3: 'bg-red-100 text-red-800',
+            4: 'bg-gray-100 text-gray-800'
+        };
+
         // 加载账号列表
         async function loadAccounts() {
             try {
-                const response = await fetch('/api/accounts?page_size=100');
+                const params = new URLSearchParams({
+                    page: currentPage,
+                    page_size: pageSize,
+                    sort_by: currentSortBy,
+                    sort_order: currentSortOrder
+                });
+                const response = await fetch(`/api/accounts?${params}`);
                 const data = await response.json();
                 const tbody = document.getElementById('accounts-table');
                 tbody.innerHTML = '';
+
+                totalCount = data.total;
+                const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+                if (currentPage > totalPages) { currentPage = totalPages; }
+                document.getElementById('page-total').textContent = totalCount;
+                document.getElementById('page-current').textContent = currentPage;
+                document.getElementById('page-pages').textContent = totalPages;
+                document.getElementById('btn-prev').disabled = currentPage <= 1;
+                document.getElementById('btn-next').disabled = currentPage >= totalPages;
 
                 if (data.accounts.length === 0) {
                     tbody.innerHTML = '<tr><td colspan="10" class="px-4 py-8 text-center text-gray-500">暂无账号</td></tr>';
@@ -174,6 +252,9 @@
                         <td class="px-4 py-3 text-sm text-gray-500">${new Date(account.created_at).toLocaleString('zh-CN')}</td>
                         <td class="px-4 py-3">
                             <div class="flex space-x-2">
+                                <button onclick="openDetailModal(${account.id})" class="text-indigo-600 hover:text-indigo-800" title="详情">
+                                    <i class="fa fa-eye"></i>
+                                </button>
                                 <button onclick="loginAccount(${account.id})" class="text-blue-600 hover:text-blue-800" title="登录">
                                     <i class="fa fa-sign-in"></i>
                                 </button>
@@ -189,6 +270,108 @@
                 console.error('加载账号列表失败:', error);
                 document.getElementById('accounts-table').innerHTML = '<tr><td colspan="10" class="px-4 py-8 text-center text-red-500">加载失败</td></tr>';
             }
+        }
+
+        // 分页控制
+        function gotoPage(page) {
+            const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+            if (page < 1 || page > totalPages) return;
+            currentPage = page;
+            loadAccounts();
+        }
+
+        function changePageSize() {
+            pageSize = parseInt(document.getElementById('page-size').value);
+            currentPage = 1;
+            loadAccounts();
+        }
+
+        // 排序控制：同列点击切换升降序，不同列默认降序
+        function sortBy(column) {
+            if (currentSortBy === column) {
+                currentSortOrder = currentSortOrder === 'desc' ? 'asc' : 'desc';
+            } else {
+                currentSortBy = column;
+                currentSortOrder = 'desc';
+            }
+            updateSortIcons();
+            currentPage = 1;
+            loadAccounts();
+        }
+
+        function updateSortIcons() {
+            ['id', 'username', 'points', 'total_points', 'mining_status', 'status', 'created_at'].forEach(col => {
+                const el = document.getElementById(`sort-icon-${col}`);
+                if (!el) return;
+                el.textContent = col === currentSortBy ? (currentSortOrder === 'desc' ? '▼' : '▲') : '';
+            });
+        }
+
+        // 账号详情
+        async function openDetailModal(accountId) {
+            const modal = document.getElementById('detail-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            document.getElementById('detail-title').textContent = `#${accountId}`;
+            document.getElementById('detail-info').innerHTML = '<div class="col-span-2 text-center text-gray-400 py-4">加载中...</div>';
+            document.getElementById('detail-tasks').innerHTML = '<tr><td colspan="5" class="px-3 py-4 text-center text-gray-400">加载中...</td></tr>';
+
+            try {
+                const [accRes, taskRes] = await Promise.all([
+                    fetch(`/api/accounts/${accountId}`),
+                    fetch(`/api/tasks?account_id=${accountId}&page_size=10`)
+                ]);
+                const acc = await accRes.json();
+                if (!accRes.ok) throw new Error(acc.detail || '加载失败');
+
+                const miningMap = {0: '未开始', 1: '挖矿中', 2: '可领取'};
+                const statusMap = {0: '禁用', 1: '正常', 2: '异常'};
+                const fields = [
+                    ['ID', acc.id],
+                    ['用户名', acc.username],
+                    ['邀请码', `<span class="font-mono">${acc.invite_code || '-'}</span>`],
+                    ['邀请人ID', acc.inviter_id || '-'],
+                    ['当前积分', acc.points.toFixed(2)],
+                    ['累计积分', acc.total_points.toFixed(2)],
+                    ['挖矿状态', miningMap[acc.mining_status] ?? acc.mining_status],
+                    ['账号状态', statusMap[acc.status] ?? acc.status],
+                    ['最近领取', acc.last_mining_claim ? new Date(acc.last_mining_claim).toLocaleString('zh-CN') : '-'],
+                    ['站点会话', acc.has_session
+                        ? '<span class="text-green-600 font-medium">有效（有 cookie）</span>'
+                        : '<span class="text-gray-400">无（未注册/未登录）</span>'],
+                    ['创建时间', new Date(acc.created_at).toLocaleString('zh-CN')],
+                    ['更新时间', new Date(acc.updated_at).toLocaleString('zh-CN')]
+                ];
+                document.getElementById('detail-title').textContent = `#${acc.id} ${acc.username}`;
+                document.getElementById('detail-info').innerHTML = fields.map(([k, v]) => `
+                    <div class="flex"><span class="text-gray-400 w-24 shrink-0">${k}</span><span class="font-medium break-all">${v}</span></div>
+                `).join('');
+
+                const taskData = await taskRes.json();
+                const tbody = document.getElementById('detail-tasks');
+                if (!taskData.tasks || taskData.tasks.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="px-3 py-4 text-center text-gray-400">暂无任务</td></tr>';
+                } else {
+                    tbody.innerHTML = taskData.tasks.map(t => `
+                        <tr class="border-t border-gray-100">
+                            <td class="px-3 py-2">${t.id}</td>
+                            <td class="px-3 py-2">${t.task_name || '-'}</td>
+                            <td class="px-3 py-2">${typeMap[t.task_type] ?? t.task_type}</td>
+                            <td class="px-3 py-2"><span class="px-2 py-0.5 rounded text-xs ${taskStatusClass[t.status] ?? ''}">${taskStatusMap[t.status] ?? t.status}</span></td>
+                            <td class="px-3 py-2 text-gray-500">${new Date(t.created_at).toLocaleString('zh-CN')}</td>
+                        </tr>
+                    `).join('');
+                }
+            } catch (error) {
+                console.error('加载账号详情失败:', error);
+                document.getElementById('detail-info').innerHTML = `<div class="col-span-2 text-center text-red-500 py-4">加载失败: ${error.message}</div>`;
+            }
+        }
+
+        function closeDetailModal() {
+            const modal = document.getElementById('detail-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
         }
 
         // 打开添加模态框

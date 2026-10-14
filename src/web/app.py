@@ -4,7 +4,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, asc, desc
 from src.config.settings import settings
 from src.db.session import get_db, init_db
 from src.db.models import Account, Task, InviteRelation, Setting
@@ -138,6 +138,8 @@ async def get_accounts(
     page: int = 1,
     page_size: int = 20,
     status: Optional[int] = None,
+    sort_by: str = "id",
+    sort_order: str = "desc",
     db: AsyncSession = Depends(get_db)
 ):
     """获取账号列表"""
@@ -145,15 +147,31 @@ async def get_accounts(
     if status is not None:
         query = query.where(Account.status == status)
 
+    # 排序（白名单防注入）
+    sort_columns = {
+        "id": Account.id,
+        "username": Account.username,
+        "points": Account.points,
+        "total_points": Account.total_points,
+        "mining_status": Account.mining_status,
+        "status": Account.status,
+        "created_at": Account.created_at,
+    }
+    sort_col = sort_columns.get(sort_by, Account.id)
+    query = query.order_by(desc(sort_col) if sort_order == "desc" else asc(sort_col))
+
     # 分页
     offset = (page - 1) * page_size
-    query = query.order_by(Account.id.desc()).offset(offset).limit(page_size)
+    query = query.offset(offset).limit(page_size)
 
     result = await db.execute(query)
     accounts = list(result.scalars().all())
 
-    # 计算总数
-    count_result = await db.execute(select(func.count(Account.id)))
+    # 计算总数（与列表同条件过滤）
+    count_query = select(func.count(Account.id))
+    if status is not None:
+        count_query = count_query.where(Account.status == status)
+    count_result = await db.execute(count_query)
     total = count_result.scalar_one()
 
     return {
@@ -197,6 +215,7 @@ async def get_account(account_id: int, db: AsyncSession = Depends(get_db)):
         "mining_status": account.mining_status,
         "last_mining_claim": account.last_mining_claim,
         "status": account.status,
+        "has_session": bool(account.cookies),
         "created_at": account.created_at,
         "updated_at": account.updated_at
     }
@@ -311,7 +330,7 @@ async def batch_create_accounts(data: BatchAccountCreate, db: AsyncSession = Dep
     # 建立邀请关系 + 提交注册任务
     matrix_manager = InviteMatrixManager()
     register_tasks = []
-    for acc, picked_inviter_id, picked_referral in created:
+    for idx, (acc, picked_inviter_id, picked_referral) in enumerate(created):
         if picked_inviter_id is not None:
             await matrix_manager._create_invite_relation(db, picked_inviter_id, acc.id, level=1)
         if data.auto_register:
@@ -320,7 +339,8 @@ async def batch_create_accounts(data: BatchAccountCreate, db: AsyncSession = Dep
                 task_type=TaskType.REGISTER,
                 task_name=f"批量注册: {acc.username}",
                 task_params={"display_name": acc.username, "referral_code": picked_referral},
-                scheduled_at=now,
+                # 错峰调度：瞬间并发注册会触发站点 429 限流（1h 冷却）
+                scheduled_at=now + timedelta(seconds=idx * 20),
                 max_retries=data.max_retries
             )
             register_tasks.append(task.id)
