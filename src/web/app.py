@@ -251,14 +251,37 @@ async def batch_create_accounts(data: BatchAccountCreate, db: AsyncSession = Dep
     if not 1 <= data.count <= 100:
         raise HTTPException(status_code=400, detail="count 取值范围 1-100")
 
-    # 校验邀请人并取其邀请码作为站点推荐码
-    referral_code = None
+    # 指定邀请人时校验其存在；未指定则从"已有真实邀请码"的账号池中逐个随机分配
+    inviter = None
     if data.inviter_id is not None:
         result = await db.execute(select(Account).where(Account.id == data.inviter_id))
         inviter = result.scalar_one_or_none()
         if not inviter:
             raise HTTPException(status_code=404, detail=f"Inviter not found: {data.inviter_id}")
-        referral_code = inviter.invite_code
+    else:
+        result = await db.execute(
+            select(Account.id, Account.invite_code)
+            .where(
+                Account.status == 1,
+                Account.invite_code.isnot(None),
+                Account.invite_code.notlike("PENDING_%"),  # 排除未注册的占位码
+            )
+        )
+        valid_referrers = result.all()
+        if not valid_referrers:
+            raise HTTPException(
+                status_code=400,
+                detail="没有可用的邀请码：请先完成至少一个账号的注册，或手动指定邀请人ID"
+            )
+
+    def pick_referral() -> tuple[Optional[int], Optional[str]]:
+        """返回 (inviter_id, 站点推荐码)；指定邀请人用固定值，否则从有效池随机"""
+        if data.inviter_id is not None:
+            return inviter.id, inviter.invite_code
+        if not valid_referrers:
+            return None, None
+        aid, code = random.choice(valid_referrers)
+        return aid, code
 
     # 载入已有用户名和邀请码，避免唯一约束冲突
     result = await db.execute(select(Account.username))
@@ -269,32 +292,34 @@ async def batch_create_accounts(data: BatchAccountCreate, db: AsyncSession = Dep
     created = []
     now = datetime.now()
     for _ in range(data.count):
+        # 未指定邀请人时，每个新账号独立随机挂到现有有效邀请码下（分散矩阵）
+        picked_inviter_id, picked_referral = pick_referral()
         account = Account(
             username=_generate_username(used_names),
             password="PENDING_REGISTER",  # 注册任务成功后回填站点 loginKey
             invite_code=_generate_placeholder(used_codes),
-            inviter_id=data.inviter_id,
+            inviter_id=picked_inviter_id,
             status=1
         )
         db.add(account)
-        created.append(account)
+        created.append((account, picked_inviter_id, picked_referral))
 
     await db.commit()
-    for acc in created:
+    for acc, _, _ in created:
         await db.refresh(acc)
 
     # 建立邀请关系 + 提交注册任务
     matrix_manager = InviteMatrixManager()
     register_tasks = []
-    for acc in created:
-        if data.inviter_id is not None:
-            await matrix_manager._create_invite_relation(db, data.inviter_id, acc.id, level=1)
+    for acc, picked_inviter_id, picked_referral in created:
+        if picked_inviter_id is not None:
+            await matrix_manager._create_invite_relation(db, picked_inviter_id, acc.id, level=1)
         if data.auto_register:
             task = await create_task(
                 account_id=acc.id,
                 task_type=TaskType.REGISTER,
                 task_name=f"批量注册: {acc.username}",
-                task_params={"display_name": acc.username, "referral_code": referral_code},
+                task_params={"display_name": acc.username, "referral_code": picked_referral},
                 scheduled_at=now,
                 max_retries=data.max_retries
             )
@@ -305,8 +330,8 @@ async def batch_create_accounts(data: BatchAccountCreate, db: AsyncSession = Dep
     return {
         "message": f"Created {len(created)} accounts",
         "accounts": [
-            {"id": acc.id, "username": acc.username, "inviter_id": acc.inviter_id}
-            for acc in created
+            {"id": acc.id, "username": acc.username, "inviter_id": picked_inviter_id}
+            for acc, picked_inviter_id, _ in created
         ],
         "register_task_ids": register_tasks
     }
@@ -599,6 +624,74 @@ async def generate_invite_matrix(matrix_data: MatrixGenerate):
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/api/invite/relations")
+async def get_invite_relations(db: AsyncSession = Depends(get_db)):
+    """获取全部邀请关系列表 + 邀请树，供邀请矩阵页面渲染"""
+    result = await db.execute(
+        select(
+            InviteRelation,
+            Account.username.label("inviter_name"),
+            Account.invite_code.label("inviter_code"),
+        )
+        .join(Account, Account.id == InviteRelation.inviter_id)
+        .order_by(InviteRelation.level.asc(), InviteRelation.id.asc())
+    )
+    rows = result.all()
+
+    # 被邀请人用户名（一次查出避免 N+1）
+    invitee_ids = [r.InviteRelation.invitee_id for r in rows]
+    name_map: dict = {}
+    if invitee_ids:
+        res = await db.execute(
+            select(Account.id, Account.username).where(Account.id.in_(invitee_ids))
+        )
+        name_map = {aid: uname for aid, uname in res.all()}
+
+    relations = []
+    children: dict = {}
+    for r in rows:
+        rel = r.InviteRelation
+        inviter_label = f"{r.inviter_name} (#{rel.inviter_id})"
+        invitee_name = name_map.get(rel.invitee_id, f"#{rel.invitee_id}")
+        item = {
+            "id": rel.id,
+            "inviter_id": rel.inviter_id,
+            "inviter_name": r.inviter_name,
+            "invitee_id": rel.invitee_id,
+            "invitee_name": invitee_name,
+            "level": rel.level,
+            "reward_rate": rel.reward_rate,
+            "total_reward": rel.total_reward,
+            "created_at": rel.created_at,
+        }
+        relations.append(item)
+        children.setdefault(rel.inviter_id, []).append(item)
+
+    # 构建邀请树：节点 = 邀请人，子节点为其直接邀请的账号
+    def build_node(account_id: int, name: str, depth: int = 0) -> dict:
+        return {
+            "id": account_id,
+            "name": name,
+            "children": [
+                build_node(c["invitee_id"], c["invitee_name"], depth + 1)
+                for c in children.get(account_id, [])
+            ],
+        }
+
+    # 根节点：没有任何人邀请它的邀请人
+    all_inviters = {r.InviteRelation.inviter_id: r.inviter_name for r in rows}
+    invited_set = {r.InviteRelation.invitee_id for r in rows}
+    roots = [aid for aid in all_inviters if aid not in invited_set]
+    tree = [
+        build_node(aid, all_inviters[aid])
+        for aid in sorted(roots, key=lambda x: (children.get(x, [{}])[0].get("level", 0), x))
+    ] if roots else []
+
+    avg_level = sum(r["level"] for r in relations) / len(relations) if relations else 0
+
+    return {"relations": relations, "tree": tree, "avg_level": round(avg_level, 2)}
+
 
 @app.get("/api/invite/statistics")
 async def get_invite_statistics(account_id: Optional[int] = None, db: AsyncSession = Depends(get_db)):

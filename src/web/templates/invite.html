@@ -150,17 +150,64 @@
             }
         }
 
-        // 加载邀请关系列表
+        // 加载邀请关系列表 + 邀请树
         async function loadInviteRelations() {
             try {
-                // 这里需要添加获取邀请关系的API
-                // 暂时使用模拟数据
+                const response = await fetch('/api/invite/relations');
+                const data = await response.json();
+
+                // 平均层级统计卡
+                document.getElementById('avg-level').textContent = data.avg_level ?? 0;
+
+                // 关系列表
                 const tbody = document.getElementById('invite-table');
-                tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-500">邀请关系API开发中...</td></tr>';
+                if (!data.relations || data.relations.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-500">暂无邀请关系，可通过批量创建账号或生成矩阵建立</td></tr>';
+                } else {
+                    tbody.innerHTML = data.relations.map(r => `
+                        <tr class="border-b hover:bg-gray-50">
+                            <td class="px-4 py-3 text-sm text-gray-500">${r.id}</td>
+                            <td class="px-4 py-3 text-sm font-medium">${r.inviter_name} <span class="text-gray-400">#${r.inviter_id}</span></td>
+                            <td class="px-4 py-3 text-sm font-medium">${r.invitee_name} <span class="text-gray-400">#${r.invitee_id}</span></td>
+                            <td class="px-4 py-3 text-sm">
+                                <span class="px-2 py-0.5 rounded-full text-xs ${r.level === 1 ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}">L${r.level}</span>
+                            </td>
+                            <td class="px-4 py-3 text-sm text-gray-500">${(r.reward_rate * 100).toFixed(0)}%</td>
+                            <td class="px-4 py-3 text-sm text-green-600">${(r.total_reward || 0).toFixed(2)}</td>
+                            <td class="px-4 py-3 text-sm text-gray-500">${new Date(r.created_at).toLocaleString('zh-CN')}</td>
+                        </tr>
+                    `).join('');
+                }
+
+                // 邀请树
+                const treeEl = document.getElementById('invite-tree');
+                if (!data.tree || data.tree.length === 0) {
+                    treeEl.innerHTML = '<p class="text-gray-500 text-center py-8">暂无邀请关系</p>';
+                } else {
+                    treeEl.innerHTML = data.tree.map(root => renderTreeNode(root)).join('');
+                }
             } catch (error) {
                 console.error('加载邀请关系失败:', error);
                 document.getElementById('invite-table').innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-red-500">加载失败</td></tr>';
             }
+        }
+
+        // 递归渲染邀请树节点
+        function renderTreeNode(node, depth = 0) {
+            const hasChildren = node.children && node.children.length > 0;
+            const color = depth === 0 ? 'text-purple-700 bg-purple-50 border-purple-200'
+                        : depth === 1 ? 'text-blue-700 bg-blue-50 border-blue-200'
+                        : 'text-gray-700 bg-gray-50 border-gray-200';
+            let html = `
+                <div class="flex items-center gap-2 my-1" style="margin-left:${depth * 24}px">
+                    <i class="fa ${hasChildren ? 'fa-sitemap' : 'fa-user'} text-gray-400 text-xs"></i>
+                    <span class="px-2 py-1 rounded border text-sm font-medium ${color}">${node.name} #${node.id}</span>
+                    ${hasChildren ? `<span class="text-xs text-gray-400">${node.children.length} 个下级</span>` : ''}
+                </div>`;
+            if (hasChildren) {
+                html += node.children.map(c => renderTreeNode(c, depth + 1)).join('');
+            }
+            return html;
         }
 
         // 打开生成矩阵模态框

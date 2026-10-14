@@ -3,10 +3,14 @@ from typing import Optional, List
 from sqlalchemy import ForeignKey, String, Float, Integer, DateTime, Text, Boolean
 from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-from sqlalchemy.sql import func
 
 class Base(AsyncAttrs, DeclarativeBase):
     pass
+
+# 注意：统一用本地时间 datetime.now()。SQLite 的 func.now()/CURRENT_TIMESTAMP 是 UTC，
+# 与 worker 代码里的 datetime.now()（本地）混用会导致同一表内时间相差时区偏移
+def _now() -> datetime:
+    return datetime.now()
 
 class Account(Base):
     __tablename__ = "accounts"
@@ -24,8 +28,8 @@ class Account(Base):
     mining_status: Mapped[int] = mapped_column(Integer, default=0)  # 0未开始, 1挖矿中, 2可领取
     last_mining_claim: Mapped[Optional[datetime]] = mapped_column(DateTime)
     status: Mapped[int] = mapped_column(Integer, default=1)  # 0禁用, 1正常, 2异常
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now(), onupdate=_now())
 
     # 关系
     inviter: Mapped[Optional["Account"]] = relationship("Account", remote_side=[id], back_populates="invitees")
@@ -51,7 +55,7 @@ class InviteRelation(Base):
     level: Mapped[int] = mapped_column(Integer, nullable=False)  # 邀请层级
     reward_rate: Mapped[float] = mapped_column(Float, default=0.1)
     total_reward: Mapped[float] = mapped_column(Float, default=0.0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now())
 
     # 关系
     inviter: Mapped["Account"] = relationship(
@@ -81,8 +85,8 @@ class Task(Base):
     scheduled_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
-    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, onupdate=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now())
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, onupdate=_now())
 
     # 关系
     account: Mapped["Account"] = relationship("Account", back_populates="tasks")
@@ -94,4 +98,4 @@ class Setting(Base):
     key: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     value: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(String(500))
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now(), onupdate=_now())

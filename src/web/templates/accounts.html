@@ -27,9 +27,14 @@
         <!-- 操作按钮 -->
         <div class="flex justify-between items-center mb-6">
             <h2 class="text-2xl font-bold">账号管理</h2>
-            <button onclick="openAddModal()" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition flex items-center">
-                <i class="fa fa-plus mr-2"></i> 添加账号
-            </button>
+            <div class="flex gap-2">
+                <button onclick="openBatchModal()" class="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700 transition flex items-center">
+                    <i class="fa fa-users mr-2"></i> 批量创建
+                </button>
+                <button onclick="openAddModal()" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition flex items-center">
+                    <i class="fa fa-plus mr-2"></i> 添加账号
+                </button>
+            </div>
         </div>
 
         <!-- 账号列表 -->
@@ -85,6 +90,39 @@
                 <div class="flex justify-end space-x-3">
                     <button type="button" onclick="closeAddModal()" class="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50 transition">取消</button>
                     <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition">添加</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 批量创建账号模态框 -->
+    <div id="batch-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+        <div class="bg-white rounded-lg p-6 w-full max-w-md">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold">批量创建账号</h3>
+                <button onclick="closeBatchModal()" class="text-gray-500 hover:text-gray-700">
+                    <i class="fa fa-times text-xl"></i>
+                </button>
+            </div>
+            <form id="batch-form" onsubmit="batchCreateAccounts(event)">
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">创建数量（1-100）</label>
+                    <input type="number" id="batch_count" min="1" max="100" value="5" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500">
+                    <p class="text-xs text-gray-400 mt-1">用户名自动随机生成（如 ivory_ridge96）</p>
+                </div>
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">邀请人ID（可选）</label>
+                    <input type="number" id="batch_inviter_id" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500" placeholder="留空则随机使用现有账号的邀请码">
+                </div>
+                <div class="mb-4">
+                    <label class="flex items-center gap-2 text-sm text-gray-700">
+                        <input type="checkbox" id="batch_auto_register" checked class="w-4 h-4 rounded focus:ring-purple-500">
+                        创建后自动提交站点注册任务（异步执行）
+                    </label>
+                </div>
+                <div class="flex justify-end space-x-3">
+                    <button type="button" onclick="closeBatchModal()" class="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50 transition">取消</button>
+                    <button type="submit" id="batch-submit" class="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition">创建</button>
                 </div>
             </form>
         </div>
@@ -163,7 +201,51 @@
         function closeAddModal() {
             document.getElementById('add-modal').classList.add('hidden');
             document.getElementById('add-modal').classList.remove('flex');
-            document.getElementById('add-form').reset();
+        }
+
+        // 批量创建
+        function openBatchModal() {
+            document.getElementById('batch-modal').classList.remove('hidden');
+            document.getElementById('batch-modal').classList.add('flex');
+        }
+
+        function closeBatchModal() {
+            document.getElementById('batch-modal').classList.add('hidden');
+            document.getElementById('batch-modal').classList.remove('flex');
+            document.getElementById('batch-form').reset();
+            document.getElementById('batch_auto_register').checked = true;
+        }
+
+        async function batchCreateAccounts(event) {
+            event.preventDefault();
+            const count = parseInt(document.getElementById('batch_count').value);
+            const inviterId = document.getElementById('batch_inviter_id').value;
+            const autoRegister = document.getElementById('batch_auto_register').checked;
+            const btn = document.getElementById('batch-submit');
+            btn.disabled = true;
+            btn.textContent = '创建中...';
+            try {
+                const response = await fetch('/api/accounts/batch', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        count,
+                        inviter_id: inviterId ? parseInt(inviterId) : null,
+                        auto_register: autoRegister
+                    })
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.detail || '创建失败');
+                alert(`成功创建 ${count} 个账号${autoRegister ? '，注册任务已提交异步执行' : ''}\n` +
+                      data.accounts.map(a => `#${a.id} ${a.username}`).join('\n'));
+                closeBatchModal();
+                loadAccounts();
+            } catch (error) {
+                alert('批量创建失败: ' + error.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '创建';
+            }
         }
 
         // 添加账号
