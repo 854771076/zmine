@@ -141,12 +141,27 @@ class TaskWorker:
             user = result.get("user") or {}
             if user.get("handle"):
                 update_data["invite_code"] = user["handle"]
+            # 记录注册时的代理出口 IP，供封禁后做 IP 关联分析（失败不阻塞注册流程）
+            exit_ip = await client.get_exit_ip()
+            if exit_ip:
+                update_data["proxy_ip"] = exit_ip
 
             await db.execute(
                 update(Account)
                 .where(Account.id == account.id)
                 .values(**update_data)
             )
+            # 行为丰化：注册完成立即排一次 Mind 答题（最像真人的行为，提高账号活性画像），
+            # 随机 2-8 分钟后执行，避免与注册请求时序指纹重叠
+            await db.execute(Task.__table__.insert().values(
+                task_name=f"Mind答题-{account.username}",
+                task_type=TaskType.MIND,
+                account_id=account.id,
+                status=TaskStatus.PENDING,
+                scheduled_at=datetime.now() + timedelta(seconds=random.uniform(120, 480)),
+                created_at=datetime.now(),
+                updated_at=datetime.now(),
+            ))
             await db.commit()
 
             return result
@@ -407,7 +422,21 @@ class TaskWorker:
                         if not account.password or account.password == "PENDING_REGISTER":
                             raise ValueError(f"Account not registered yet: {account.username}")
                         # 用 loginKey 重新登录刷新 zmine_session，持久化后重试
-                        await self._handle_login_task(task, account, db)
+                        try:
+                            await self._handle_login_task(task, account, db)
+                        except ZMineAPIError as e2:
+                            # 重登仍失败且站点明确返回 disabled：账号已被风控封禁，
+                            # 置 status=0 让调度器永久跳过（任务本身按失败处理）
+                            if "disabled" in str(e2).lower():
+                                await db.execute(
+                                    update(Account)
+                                    .where(Account.id == account.id)
+                                    .values(status=0, updated_at=datetime.now())
+                                )
+                                await db.commit()
+                                print(f"🚫 Account {account.id}({account.username}) disabled by site, marked offline")
+                                raise ValueError(f"Account disabled by site: {account.username}") from e2
+                            raise
                         await db.refresh(account)
                         task_result = await self._execute_task(task, account, db)
 

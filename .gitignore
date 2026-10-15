@@ -16,3 +16,7 @@ __pycache__/
 
 # 系统
 .DS_Store
+
+# SQLite WAL 运行时文件
+zmine.db-shm
+zmine.db-wal

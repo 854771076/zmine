@@ -28,6 +28,7 @@ class Account(Base):
     mining_status: Mapped[int] = mapped_column(Integer, default=0)  # 0未开始, 1挖矿中, 2可领取
     last_mining_claim: Mapped[Optional[datetime]] = mapped_column(DateTime)
     status: Mapped[int] = mapped_column(Integer, default=1)  # 0禁用, 1正常, 2异常
+    proxy_ip: Mapped[Optional[str]] = mapped_column(String(64))  # 注册时的代理出口 IP（风控溯源用）
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now(), onupdate=_now())
 

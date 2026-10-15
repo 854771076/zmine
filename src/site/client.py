@@ -191,6 +191,15 @@ class ZMineClient:
         """设置认证Token（站点实际使用session cookie，此方法仅记录）"""
         self.token = token
 
+    async def get_exit_ip(self) -> Optional[str]:
+        """查询当前会话的代理出口 IP（走同一 connector，与站点请求同 IP），用于风控溯源"""
+        try:
+            async with self.session.get("https://api.ipify.org?format=json") as resp:
+                data = await resp.json(content_type=None)
+                return data.get("ip")
+        except Exception:
+            return None
+
     def get_cookies_dict(self) -> Dict[str, str]:
         """获取当前所有Cookie的字典形式"""
         if not self.session:

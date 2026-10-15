@@ -36,6 +36,8 @@ async def init_db() -> None:
         # create_all 不会给已存在的表加列，这里做简单的幂等列迁移
         if not await _has_column(conn, "tasks", "updated_at"):
             await conn.execute(text("ALTER TABLE tasks ADD COLUMN updated_at DATETIME"))
+        if not await _has_column(conn, "accounts", "proxy_ip"):
+            await conn.execute(text("ALTER TABLE accounts ADD COLUMN proxy_ip VARCHAR(64)"))
         # 历史数据时区迁移：模型曾用 func.now()(UTC)，与代码里的 datetime.now()(本地) 混存
         # 差 8 小时，统一把 created_at 类列修正为本地时间（user_version 幂等标记）
         version = (await conn.exec_driver_sql("PRAGMA user_version")).scalar()
