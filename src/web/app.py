@@ -340,9 +340,10 @@ async def batch_create_accounts(data: BatchAccountCreate, db: AsyncSession = Dep
                 task_name=f"批量注册: {acc.username}",
                 task_params={"display_name": acc.username, "referral_code": picked_referral},
                 # 错峰调度：瞬间并发注册会触发站点 429 限流（1h 冷却）；
-                # 20s 固定间隔的时序指纹仍过于扎堆（实测 60% 账号同一时段注册后遭风控清理），
-                # 改为 60-120s 随机间隔打散
-                scheduled_at=now + timedelta(seconds=idx * random.uniform(60, 120)),
+                # 固定 20s 的时序指纹过于扎堆（实测 60% 账号同一时段注册后遭风控清理），
+                # 改为随机间隔打散（默认 30-60s，.env 的 register_stagger_min/max 可调）
+                scheduled_at=now + timedelta(seconds=idx * random.uniform(
+                    settings.register_stagger_min, settings.register_stagger_max)),
                 max_retries=data.max_retries
             )
             register_tasks.append(task.id)
