@@ -15,6 +15,26 @@ from src.config.settings import settings
 # web 接口出现随机 1 秒级尖刺。随机化发生在 .random 属性调用时，共享实例无副作用
 _UA = UserAgent()
 
+# 模块级共享连接池：TLS 连接建立在"本机→站点"层，与账号 cookie 无关，
+# 跨任务/跨账号复用可把 SOCKS5+TLS 握手开销（约 8-10KB/次，占单任务流量 70%+）
+# 摊薄到整个进程生命周期。keepalive 拉长到 1h 以覆盖分钟级任务间隔
+_shared_connector: Optional[ProxyConnector] = None
+
+def _get_shared_connector() -> Optional[ProxyConnector]:
+    global _shared_connector
+    if _shared_connector is None and settings.proxy_url:
+        proxy = settings.proxy_url
+        if proxy.startswith(("socks4://", "socks5://")):
+            _shared_connector = ProxyConnector.from_url(
+                proxy, limit=50, keepalive_timeout=3600, ttl_dns_cache=600
+            )
+        else:
+            # HTTP 代理走 aiohttp 原生 proxy= 参数，无需自定义 connector
+            _shared_connector = aiohttp.TCPConnector(
+                limit=50, keepalive_timeout=3600, ttl_dns_cache=600
+            )
+    return _shared_connector
+
 class ZMineAPIError(Exception):
     """自定义API异常"""
     def __init__(self, message: str, status_code: Optional[int] = None, response: Optional[Dict[str, Any]] = None):
@@ -65,14 +85,17 @@ class ZMineClient:
     async def __aenter__(self) -> "ZMineClient":
         """异步上下文管理器入口"""
         cookie_jar = CookieJar(unsafe=True)
-        # SOCKS 代理须经 connector 实现（aiohttp 的 proxy= 参数仅支持 HTTP 代理）
-        self._is_socks = bool(self.proxy_url and self.proxy_url.startswith(("socks4://", "socks5://")))
-        connector = ProxyConnector.from_url(self.proxy_url) if self._is_socks else None
+        # SOCKS 代理须经 connector 实现（aiohttp 的 proxy= 参数仅支持 HTTP 代理）。
+        # connector 使用进程级共享连接池；connector_owner=False 防止 session.close()
+        # 把共享池一起关掉（连接由进程生命周期管理）
+        shared = _get_shared_connector()
+        self._is_socks = isinstance(shared, ProxyConnector)
         self.session = ClientSession(
             base_url=self.base_url,
             cookie_jar=cookie_jar,
             headers=self.default_headers,
-            connector=connector
+            connector=shared,
+            connector_owner=False
         )
 
         # 设置初始cookies（站点认证基于 zmine_session cookie，非 Bearer token）

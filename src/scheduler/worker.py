@@ -36,6 +36,10 @@ class TaskWorker:
 
     def __init__(self, max_concurrent: Optional[int] = None):
         self.max_concurrent = max_concurrent or settings.max_concurrent
+        # 基础设施熔断：连续 N 个任务因代理/网络类错误失败时暂停拾取，
+        # 避免代理故障期间无限烧任务（实测代理凭证失效 4 小时烧掉 1600+ 任务）
+        self.infra_fail_streak = 0
+        self.circuit_open_until: Optional[datetime] = None
         # 队列分离：按任务类型独立并发槽，慢任务（Mind 冷却等待）不再堵住快任务
         self.queues: Dict[str, Dict[str, Any]] = {
             "main": {  # 挖矿/领取/同步（快任务）
@@ -439,8 +443,7 @@ class TaskWorker:
                             raise
                         await db.refresh(account)
                         task_result = await self._execute_task(task, account, db)
-
-                    # 更新任务状态为成功
+                        self.infra_fail_streak = 0  # 任一任务成功即恢复正常计数
                     await self._update_task_status(
                         db,
                         task.id,
@@ -449,6 +452,8 @@ class TaskWorker:
                     )
 
             except Exception as e:
+                # 熔断计数：连续基础设施错误达到阈值后暂停拾取
+                self._note_task_failure(e, task.id)
                 # 重试次数检查
                 if task.retry_count < task.max_retries:
                     # 增加重试次数，状态重置为等待
@@ -471,6 +476,35 @@ class TaskWorker:
                         TaskStatus.FAILED,
                         error_msg=str(e)
                     )
+
+    # 基础设施类错误特征（代理网关拒绝/网络不通/超时），与业务错误区分
+    _INFRA_ERROR_PATTERNS = (
+        "authentication failure", "user was rejected", "socks", "proxy",
+        "clientconnectorerror", "serverdisconnected", "timeout",
+        "cannot connect", "connection reset", "connection refused",
+        "name or service not known", "temporary failure in name resolution",
+        "ssl:", "no route to host", "network is unreachable",
+    )
+
+    @classmethod
+    def _is_infra_error(cls, e: Exception) -> bool:
+        """判断是否代理/网络等基础设施错误（这类错误重试无意义，应熔断暂停）"""
+        text = str(e).lower()
+        return any(p in text for p in cls._INFRA_ERROR_PATTERNS)
+
+    def _note_task_failure(self, e: Exception, task_id: int) -> None:
+        """失败任务熔断计数：连续 infra 错误达到阈值则打开熔断，暂停拾取"""
+        if not self._is_infra_error(e):
+            self.infra_fail_streak = 0
+            return
+        self.infra_fail_streak += 1
+        if self.infra_fail_streak >= settings.infra_circuit_threshold and (
+            self.circuit_open_until is None or self.circuit_open_until <= datetime.now()
+        ):
+            pause = settings.infra_circuit_pause_sec
+            self.circuit_open_until = datetime.now() + timedelta(seconds=pause)
+            print(f"⚡ Circuit breaker OPEN: {self.infra_fail_streak} consecutive infra failures, "
+                  f"pausing task pickup for {pause}s")
 
     async def _claim_pending_tasks(self, db: AsyncSession, limit: int = 100, task_types: tuple = ()) -> List[Task]:
         """原子认领待执行任务
@@ -534,6 +568,11 @@ class TaskWorker:
 
         while self.running:
             try:
+                # 熔断打开期间暂停拾取（代理/网络故障时避免空转烧任务），到期自动恢复试探
+                if self.circuit_open_until and self.circuit_open_until > datetime.now():
+                    await asyncio.sleep(min(poll_interval, 30))
+                    continue
+
                 # 队列分离 + 滚动窗口：每类任务独立并发上限，未满就持续补位。
                 # 快任务队列（main）优先拾取，慢任务（mind）与限流敏感任务（auth）
                 # 各占独立槽位，互不抢占

@@ -46,12 +46,14 @@ class Settings(BaseSettings):
     proxy_url: Optional[str] = None
 
     # 定时任务配置
-    mining_interval: int = 60  # 自动挖矿间隔（分钟）
+    mining_interval: int = 120  # 自动挖矿间隔（分钟；24h 会话自动累积，overview 仅心跳检查，2h 一次足够）
     claim_interval: int = 240  # 自动领取奖励间隔（分钟）
     task_interval: int = 360  # 自动完成任务间隔（分钟）
     sync_interval: int = 120  # 自动同步账号信息间隔（分钟）
     mind_interval: int = 120  # mind答题间隔（分钟，冷却中断后靠下一轮继续完成当日额度）
     register_stagger_min: int = 30  # 批量注册错峰间隔下限（秒）
     register_stagger_max: int = 60  # 批量注册错峰间隔上限（秒）
+    infra_circuit_threshold: int = 10  # 连续基础设施错误(代理/网络)达到该值触发熔断
+    infra_circuit_pause_sec: int = 900  # 熔断暂停拾取时长（秒），到期自动恢复试探
 
 settings = Settings()
